@@ -5,13 +5,20 @@ const permissionsByRole = {
     school_admin: new Set([
         "school:read", "school:update", "users:manage", "audit:read",
         "academic:read", "academic:manage", "students:read", "students:manage",
-        "attendance:read", "attendance:manage"
+        "attendance:read", "attendance:manage", "finance:read", "finance:manage",
+        "exams:read", "exams:manage", "exams:marks", "operations:read",
+        "operations:manage", "notifications:read", "notifications:manage", "reports:read"
     ]),
     principal: new Set([
         "school:read", "academic:read", "academic:manage",
-        "students:read", "students:manage", "attendance:read", "attendance:manage", "reports:read"
+        "students:read", "students:manage", "attendance:read", "attendance:manage",
+        "finance:read", "reports:read", "exams:read", "exams:manage", "exams:marks",
+        "operations:read", "operations:manage", "notifications:read", "notifications:manage"
     ]),
-    teacher: new Set(["school:read", "academic:read", "attendance:read", "attendance:manage"]),
+    teacher: new Set([
+        "school:read", "academic:read", "attendance:read", "attendance:manage", "exams:marks",
+        "notifications:read"
+    ]),
     parent: new Set(["school:read", "student:read", "notifications:read"])
 };
 
@@ -35,6 +42,16 @@ export const requirePermission = (permission) => (req, res, next) => {
 export const requireTenant = (req, res, next) => {
     if (!req.school || !req.user?.schoolId || String(req.school._id) !== String(req.user.schoolId)) {
         return next(new HttpError(403, "A school tenant context is required"));
+    }
+    return next();
+};
+
+export const requirePlanFeature = (feature) => (req, res, next) => {
+    if (!req.school || !req.subscriptionPlan) {
+        return next(new HttpError(403, "The school does not have an active subscription plan"));
+    }
+    if (req.subscriptionPlan.features?.[feature] !== true) {
+        return next(new HttpError(403, "This feature is not included in the school's subscription plan"));
     }
     return next();
 };

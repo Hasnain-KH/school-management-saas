@@ -1,6 +1,6 @@
 # SchoolFlow SaaS API
 
-SchoolFlow is a JavaScript ES module backend. The current implementation provides school onboarding, tenant-bound authentication/session revocation, school and branch profile management, academic sessions/classes/sections/subjects, teacher assignments, timetable operations, school user accounts, student admissions/placement history, guardian records, leaving-certificate records, student and staff attendance, role/permission middleware, subscription/trial access checks, audit events, and health checks. Finance, examinations, calendar, inventory, library, parent portal/document storage, notifications, billing, password recovery/email verification, and business reporting workflows are not yet implemented.
+SchoolFlow is a JavaScript ES module backend. Implemented workflows include school onboarding and tenant-bound authentication, academic and student records, attendance, fee structures and manual collections, exams and report cards, calendar/inventory/library operations, in-app announcements, database-derived operational reports, platform-managed subscription plans, configurable plan features and limits, and school subscription lifecycle management. Password recovery and email verification use expiring, hashed, single-use action tokens behind an email-provider interface; actual email delivery remains unavailable until a real provider is selected and configured. Online payment processing, external email/SMS delivery, document storage, fixed-asset assignment/depreciation, and advanced export/report builders are not implemented.
 
 ## Requirements and setup
 
@@ -24,7 +24,7 @@ npm start
 npm test
 ```
 
-The current test suite contains request-level and mocked service/model tests; it does not exercise real database persistence. School registration, academic writes, student admission/placement, and profile/audit transactions require MongoDB replica-set integration tests before production deployment.
+The current test suite contains 70 request-level and mocked service/model tests; it does not exercise real database persistence. School registration, academic writes, student admission/placement, attendance, finance collections, exam workflows, inventory movements, library loans, platform subscription changes, recovery tokens, and profile/audit transactions require MongoDB replica-set integration tests before production deployment. Email-provider tests use a mocked provider and do not demonstrate delivery.
 
 Rate limiting currently uses Express's in-memory store. It is suitable for a single process; use a shared store before running multiple API instances so limits are consistent across replicas. Production startup disables automatic index creation; deploy declared indexes through a reviewed database migration before enabling tenant traffic.
 
@@ -35,3 +35,7 @@ Before deploying a release that adds or changes indexes, back up the database, r
 See [API reference](./docs/API.md) and [data model and authorization](./docs/DATA-MODELS.md). JSON responses use `{ "success": true, "message": "...", "data": ... }`; errors use `{ "success": false, "message": "...", "errors": [...] }` where validation details apply.
 
 Platform super-admin accounts cannot be created through the public API. Provision them through a trusted, access-controlled operational process; they sign in without a `schoolSlug`. Public endpoints never grant a platform role.
+
+Before accepting public school registration, a platform super admin must create and activate a subscription plan marked `isDefaultTrial: true`. Plan limits and included feature flags are stored in MongoDB and managed through `/api/v1/platform`; the application does not define tier limits. Capacity checks serialize school-scoped admissions/user/branch additions in MongoDB transactions. Existing schools must be assigned a plan before feature-gated routes are available.
+
+No email provider is configured. Recovery and verification delivery requests therefore return an explicit `503`; no tokens are returned to clients or persisted when delivery is unavailable. To enable these workflows, integrate and configure a real provider through the provider interface in `src/services/email-delivery.provider.js`. No credentials are required or stored by the current implementation.

@@ -3,6 +3,7 @@ import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { tenantFilter } from "../middleware/authorization.middleware.js";
 import { withTransaction } from "../utils/transaction.js";
+import { assertPlanCapacity } from "../utils/plan-limits.js";
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -50,6 +51,9 @@ export const createUser = async (req, input) => {
     }
 
     return withTransaction(async (session) => {
+        if (["school_admin", "principal", "teacher"].includes(input.role)) {
+            await assertPlanCapacity(req, session, "staff");
+        }
         const user = new User({
             schoolId,
             name: input.name,
@@ -91,6 +95,11 @@ export const updateUser = async (req, userId, input) => {
         }).session(session);
         if (!user) {
             throw new HttpError(404, "User was not found in this school");
+        }
+        if (input.status === "active"
+            && user.status !== "active"
+            && ["school_admin", "principal", "teacher"].includes(user.role)) {
+            await assertPlanCapacity(req, session, "staff");
         }
         for (const [field, value] of Object.entries(input)) user.set(field, value);
         await user.save({ session });

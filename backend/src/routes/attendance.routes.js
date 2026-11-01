@@ -1,7 +1,7 @@
 import express from "express";
 import * as controller from "../controllers/attendance.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
-import { requirePermission, requireTenant } from "../middleware/authorization.middleware.js";
+import { requirePermission, requirePlanFeature, requireTenant } from "../middleware/authorization.middleware.js";
 import { validate } from "../validators/common.validator.js";
 import {
     staffAttendanceMarkSchema,
@@ -13,7 +13,7 @@ import {
 } from "../validators/attendance.validator.js";
 
 const router = express.Router();
-router.use(requireAuth, requireTenant);
+router.use(requireAuth, requireTenant, requirePlanFeature("attendance"));
 
 router.get("/students/monthly", requirePermission("attendance:read"), validate(studentAttendanceMonthQuerySchema, "query"), controller.getStudentAttendanceMonth);
 router.get("/students", requirePermission("attendance:read"), validate(studentAttendanceDayQuerySchema, "query"), controller.getStudentAttendanceDay);

@@ -11,6 +11,7 @@ import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { tenantFilter } from "../middleware/authorization.middleware.js";
 import { withTransaction } from "../utils/transaction.js";
+import { assertPlanCapacity } from "../utils/plan-limits.js";
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const validSortFields = new Set(["name", "code", "level", "startDate", "endDate", "createdAt", "dayOfWeek"]);
@@ -170,6 +171,7 @@ export const listBranches = (req, input) => {
 export const createBranch = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
+        await assertPlanCapacity(req, session, "branches");
         const school = await School.findById(schoolId).session(session);
         if (!school) {
             throw new HttpError(404, "School was not found");

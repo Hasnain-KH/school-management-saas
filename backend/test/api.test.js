@@ -33,6 +33,22 @@ const { default: StudentAcademicHistory } = await import("../src/models/student-
 const { default: StudentLeavingCertificate } = await import("../src/models/student-leaving-certificate.model.js");
 const { default: StudentAttendance } = await import("../src/models/student-attendance.model.js");
 const { default: StaffAttendance } = await import("../src/models/staff-attendance.model.js");
+const { default: FeeCategory } = await import("../src/models/fee-category.model.js");
+const { default: FeeStructure } = await import("../src/models/fee-structure.model.js");
+const { default: StudentFeeAssignment } = await import("../src/models/student-fee-assignment.model.js");
+const { default: FeeVoucher } = await import("../src/models/fee-voucher.model.js");
+const { default: FeePayment } = await import("../src/models/fee-payment.model.js");
+const { default: Exam } = await import("../src/models/exam.model.js");
+const { default: ExamMark } = await import("../src/models/exam-mark.model.js");
+const { default: CalendarEvent } = await import("../src/models/calendar-event.model.js");
+const { default: InventoryItem } = await import("../src/models/inventory-item.model.js");
+const { default: InventoryTransaction } = await import("../src/models/inventory-transaction.model.js");
+const { default: LibraryBook } = await import("../src/models/library-book.model.js");
+const { default: LibraryLoan } = await import("../src/models/library-loan.model.js");
+const { default: Announcement } = await import("../src/models/announcement.model.js");
+const { default: SubscriptionPlan } = await import("../src/models/subscription-plan.model.js");
+const { getDashboardSummary, getStudentStatistics, getAttendanceStatistics } =
+    await import("../src/services/reports.service.js");
 const { updateSchoolProfile } = await import("../src/services/school.service.js");
 const {
     admitStudent,
@@ -48,9 +64,44 @@ const {
     getStaffAttendanceMonth
 } = await import("../src/services/attendance.service.js");
 const {
+    createFeeCategory,
+    createFeeStructure,
+    createStudentFeeAssignment,
+    generateFeeVouchers,
+    collectFeePayment,
+    getFeeVoucher
+} = await import("../src/services/finance.service.js");
+const {
+    createExam,
+    enterExamMarks,
+    getStudentReportCard
+} = await import("../src/services/exam.service.js");
+const {
+    createCalendarEvent,
+    listCalendarEvents,
+    recordInventoryMovement,
+    issueLibraryBook,
+    returnLibraryBook,
+    createAnnouncement,
+    listAnnouncements
+} = await import("../src/services/operations.service.js");
+const {
     studentAttendanceMarkSchema,
     staffAttendanceMarkSchema
 } = await import("../src/validators/attendance.validator.js");
+const {
+    feeStructureCreateSchema,
+    studentFeeAssignmentCreateSchema,
+    feePaymentSchema,
+    feeVoucherGenerateSchema
+} = await import("../src/validators/finance.validator.js");
+const { examCreateSchema, examMarksSchema } = await import("../src/validators/exam.validator.js");
+const {
+    calendarEventCreateSchema,
+    inventoryMovementSchema,
+    libraryLoanCreateSchema,
+    announcementCreateSchema
+} = await import("../src/validators/operations.validator.js");
 const { createUser } = await import("../src/services/user.service.js");
 const {
     activateAcademicSession,
@@ -157,6 +208,15 @@ test("tenant filters cannot be overridden by a caller-provided school ID", () =>
     assert.equal(hasPermission("teacher", "school:update"), false);
     assert.equal(hasPermission("teacher", "students:read"), false);
     assert.equal(hasPermission("parent", "students:read"), false);
+    assert.equal(hasPermission("school_admin", "finance:manage"), true);
+    assert.equal(hasPermission("principal", "finance:read"), true);
+    assert.equal(hasPermission("principal", "finance:manage"), false);
+    assert.equal(hasPermission("teacher", "finance:read"), false);
+    assert.equal(hasPermission("teacher", "exams:marks"), true);
+    assert.equal(hasPermission("teacher", "exams:manage"), false);
+    assert.equal(hasPermission("principal", "operations:manage"), true);
+    assert.equal(hasPermission("parent", "notifications:read"), true);
+    assert.equal(hasPermission("parent", "notifications:manage"), false);
     assert.equal(hasPermission("platform_super_admin", "school:update"), false);
     for (const role of ["school_admin", "principal", "teacher", "parent", "platform_super_admin"]) {
         assert.equal(hasPermission(role, "unknown:permission"), false);
@@ -839,7 +899,7 @@ test("validated Express query parameters are normalized before academic list han
     const school = {
         _id: schoolId,
         status: "trial",
-        subscription: { status: "trial", trialEndsAt: new Date(Date.now() + 60_000) }
+        subscription: { plan: "test-plan", status: "trial", trialEndsAt: new Date(Date.now() + 60_000) }
     };
     const teacher = { _id: userId, schoolId, role: "teacher", status: "active" };
     let queryFilter;
@@ -854,6 +914,9 @@ test("validated Express query parameters are normalized before academic list han
     t.mock.method(RefreshSession, "findOne", async () => ({ userId, schoolId }));
     t.mock.method(User, "findById", async () => teacher);
     t.mock.method(School, "findById", async () => school);
+    t.mock.method(SubscriptionPlan, "findOne", () => ({
+        lean: async () => ({ _id: "64a000000000000000000010", features: { academics: true } })
+    }));
     t.mock.method(AcademicClass, "find", (filter) => {
         queryFilter = filter;
         return queryBuilder;
@@ -884,7 +947,9 @@ test("academic models require tenant IDs and declare tenant-scoped uniqueness", 
     for (const Model of [
         AcademicSession, AcademicClass, Section, Subject, ClassSubject,
         TimetableEntry, Student, Guardian, StudentGuardian, StudentAcademicHistory,
-        StudentLeavingCertificate, StudentAttendance, StaffAttendance
+        StudentLeavingCertificate, StudentAttendance, StaffAttendance, FeeCategory,
+        FeeStructure, StudentFeeAssignment, FeeVoucher, FeePayment, Exam, ExamMark,
+        CalendarEvent, InventoryItem, InventoryTransaction, LibraryBook, LibraryLoan, Announcement
     ]) {
         assert.equal(Model.schema.path("schoolId").isRequired, true);
     }
@@ -911,6 +976,33 @@ test("academic models require tenant IDs and declare tenant-scoped uniqueness", 
     assert.ok(StaffAttendance.schema.indexes().some(([keys, options]) =>
         keys.schoolId === 1 && keys.userId === 1 && keys.date === 1 && options.unique
     ));
+    assert.ok(FeeCategory.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.code === 1 && options.unique
+    ));
+    assert.ok(StudentFeeAssignment.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.studentId === 1 && keys.feeStructureId === 1 && options.unique
+    ));
+    assert.ok(FeeVoucher.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.feeAssignmentId === 1 && keys.period === 1 && options.unique
+    ));
+    assert.ok(FeePayment.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.idempotencyKey === 1 && options.unique
+    ));
+    assert.ok(Exam.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.academicSessionId === 1 && keys.classId === 1
+        && keys.name === 1 && options.unique
+    ));
+    assert.ok(ExamMark.schema.indexes().some(([keys, options]) =>
+        keys.schoolId === 1 && keys.examId === 1 && keys.studentId === 1
+        && keys.classSubjectId === 1 && options.unique
+    ));
+    for (const Model of [
+        CalendarEvent, InventoryItem, InventoryTransaction,
+        LibraryBook, LibraryLoan, Announcement
+    ]) {
+        assert.equal(Model.schema.path("schoolId").isRequired, true);
+        assert.ok(Model.schema.indexes().some(([keys]) => keys.schoolId === 1));
+    }
     assert.ok(TimetableEntry.schema.indexes().some(([keys, options]) =>
         keys.schoolId === 1
         && keys.academicSessionId === 1
@@ -1499,4 +1591,941 @@ test("staff attendance requires administrator authority and keeps monthly reads 
     assert.equal(reportFilter.schoolId, schoolId);
     assert.equal(report.items[0].staff.name, "Staff Member");
     assert.deepEqual(report.summary, { present: 1, absent: 0, late: 0, leave: 0 });
+});
+
+test("fee schema validation rejects invalid periods, discounts, currencies, and payment amounts", () => {
+    const feeStructure = {
+        academicSessionId: "64a000000000000000000001",
+        classId: "64a000000000000000000002",
+        name: "Monthly tuition",
+        code: "TUITION",
+        frequency: "monthly",
+        currency: "USD",
+        lineItems: [{
+            categoryId: "64a000000000000000000003",
+            name: "Tuition",
+            amountMinor: 12500
+        }]
+    };
+    assert.equal(feeStructureCreateSchema.safeParse(feeStructure).success, true);
+    assert.equal(feeStructureCreateSchema.safeParse({
+        ...feeStructure,
+        frequency: "annual"
+    }).success, false);
+    assert.equal(feeStructureCreateSchema.safeParse({
+        ...feeStructure,
+        currency: "US"
+    }).success, false);
+    assert.equal(studentFeeAssignmentCreateSchema.safeParse({
+        studentId: "64a000000000000000000004",
+        feeStructureId: "64a000000000000000000005",
+        discountAmountMinor: 100,
+        discountBasisPoints: 500,
+        startPeriod: "2026-01"
+    }).success, false);
+    assert.equal(feeVoucherGenerateSchema.safeParse({
+        feeStructureId: "64a000000000000000000005",
+        period: "2026-01",
+        studentIds: ["64a000000000000000000004", "64a000000000000000000004"]
+    }).success, false);
+    assert.equal(feePaymentSchema.safeParse({
+        idempotencyKey: "valid-payment-request-key",
+        amountMinor: 100,
+        method: "cash",
+        schoolId: "64a000000000000000000099"
+    }).success, false);
+    assert.equal(feePaymentSchema.safeParse({
+        idempotencyKey: "valid-payment-request-key",
+        amountMinor: 0,
+        method: "cash"
+    }).success, false);
+});
+
+test("fee categories and structures derive tenant context and verify category ownership", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: "64a000000000000000000002", schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let category;
+    let categoryAudit;
+    let structure;
+    let structureAudit;
+    let categoryFilter;
+    const sessionId = "64a000000000000000000003";
+    const classId = "64a000000000000000000004";
+    const categoryId = "64a000000000000000000005";
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(FeeCategory.prototype, "save", async function saveCategory() {
+        category = this;
+        return this;
+    });
+    t.mock.method(FeeStructure.prototype, "save", async function saveStructure() {
+        structure = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        if (this.action === "fee_category.created") categoryAudit = this;
+        if (this.action === "fee_structure.created") structureAudit = this;
+        return this;
+    });
+    const sessionQuery = (value) => ({ session: async () => value });
+    t.mock.method(AcademicSession, "findOne", () =>
+        sessionQuery({ _id: sessionId, status: "active" }));
+    t.mock.method(AcademicClass, "findOne", () =>
+        sessionQuery({ _id: classId, isActive: true }));
+    t.mock.method(FeeCategory, "find", (filter) => {
+        categoryFilter = filter;
+        return { session: async () => [{ _id: categoryId, schoolId }] };
+    });
+
+    await createFeeCategory(req, {
+        name: "Tuition",
+        code: "tuition",
+        description: "Core tuition charge"
+    });
+    const result = await createFeeStructure(req, {
+        academicSessionId: sessionId,
+        classId,
+        name: "Monthly tuition",
+        code: "tuition-monthly",
+        frequency: "monthly",
+        currency: "USD",
+        lineItems: [{ categoryId, name: "Tuition", amountMinor: 12500 }]
+    });
+    assert.equal(category.schoolId.toString(), schoolId);
+    assert.equal(category.code, "TUITION");
+    assert.equal(categoryAudit.action, "fee_category.created");
+    assert.equal(categoryFilter.schoolId, schoolId);
+    assert.equal(structure.schoolId.toString(), schoolId);
+    assert.equal(structure.currency, "USD");
+    assert.equal(structureAudit.action, "fee_structure.created");
+    assert.equal(result.lineItems[0].amountMinor, 12500);
+});
+
+test("student fee assignment enforces same-tenant placement and discount limits", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const studentId = "64a000000000000000000002";
+    const structureId = "64a000000000000000000003";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: "64a000000000000000000004", schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let assignment;
+    let auditEvent;
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(Student, "findOne", () => ({
+        session: async () => ({
+            _id: studentId,
+            academicSessionId: "64a000000000000000000005",
+            classId: "64a000000000000000000006"
+        })
+    }));
+    t.mock.method(FeeStructure, "findOne", () => ({
+        session: async () => ({
+            _id: structureId,
+            academicSessionId: "64a000000000000000000005",
+            classId: "64a000000000000000000006",
+            lineItems: [{ amountMinor: 10000 }]
+        })
+    }));
+    t.mock.method(StudentFeeAssignment.prototype, "save", async function saveAssignment() {
+        assignment = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    const result = await createStudentFeeAssignment(req, {
+        studentId,
+        feeStructureId: structureId,
+        discountBasisPoints: 1250,
+        scholarshipName: "Merit scholarship",
+        startPeriod: "2026-01"
+    });
+    assert.equal(assignment.schoolId.toString(), schoolId);
+    assert.equal(assignment.discountBasisPoints, 1250);
+    assert.equal(auditEvent.action, "student_fee.assigned");
+    assert.equal(auditEvent.metadata.discountAmountMinor, 1250);
+    assert.equal(result.scholarshipName, "Merit scholarship");
+
+    t.mock.method(StudentFeeAssignment.prototype, "save", async () => {
+        const duplicate = new Error("duplicate key");
+        duplicate.code = 11000;
+        throw duplicate;
+    });
+    await assert.rejects(createStudentFeeAssignment(req, {
+        studentId,
+        feeStructureId: structureId,
+        discountAmountMinor: 10001,
+        startPeriod: "2026-01"
+    }), {
+        statusCode: 400,
+        message: "Discount must be less than the fee structure total"
+    });
+});
+
+test("monthly voucher generation snapshots discounts and safely skips existing vouchers", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const structureId = "64a000000000000000000002";
+    const assignmentId = "64a000000000000000000003";
+    const studentId = "64a000000000000000000004";
+    const categoryId = "64a000000000000000000005";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: "64a000000000000000000006", schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    const structure = {
+        _id: structureId,
+        schoolId,
+        frequency: "monthly",
+        classId: "64a000000000000000000007",
+        academicSessionId: "64a000000000000000000008",
+        dueDay: 10,
+        currency: "USD",
+        lineItems: [{ categoryId, name: "Tuition", amountMinor: 10000 }]
+    };
+    const assignment = {
+        _id: assignmentId,
+        studentId,
+        discountAmountMinor: 0,
+        discountBasisPoints: 1000,
+        scholarshipName: "Merit"
+    };
+    let voucherRecord;
+    let auditEvent;
+    const sessionQuery = (value) => ({ session: async () => value });
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(FeeStructure, "findOne", () => sessionQuery(structure));
+    t.mock.method(StudentFeeAssignment, "find", () => sessionQuery([assignment]));
+    t.mock.method(Student, "find", () => ({
+        session() { return this; },
+        select: async () => [{ _id: studentId }]
+    }));
+    t.mock.method(FeeVoucher, "findOne", () => sessionQuery(voucherRecord ?? null));
+    t.mock.method(FeeVoucher.prototype, "save", async function saveVoucher() {
+        voucherRecord = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+
+    const input = {
+        feeStructureId: structureId,
+        period: "2026-02",
+        studentIds: [studentId]
+    };
+    const first = await generateFeeVouchers(req, input);
+    const second = await generateFeeVouchers(req, input);
+    assert.deepEqual(first, { period: "2026-02", generated: 1, alreadyGenerated: 0 });
+    assert.deepEqual(second, { period: "2026-02", generated: 0, alreadyGenerated: 1 });
+    assert.equal(voucherRecord.amountDueMinor, 9000);
+    assert.equal(voucherRecord.discountAmountMinor, 1000);
+    assert.equal(voucherRecord.dueDate.toISOString(), "2026-02-10T00:00:00.000Z");
+    assert.equal(voucherRecord.schoolId.toString(), schoolId);
+    assert.equal(auditEvent.action, "fee_vouchers.generated");
+});
+
+test("manual fee collection supports partial payments, immutable receipts, and idempotent retries", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const voucherId = "64a000000000000000000002";
+    const studentId = "64a000000000000000000003";
+    const actorUserId = "64a000000000000000000004";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: actorUserId, schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let storedPayment;
+    let updateCount = 0;
+    let updateFilter;
+    let paymentLookup;
+    let auditEvent;
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(FeePayment, "findOne", (filter) => {
+        paymentLookup = filter;
+        return {
+        session: async () => filter.idempotencyKey === storedPayment?.idempotencyKey
+            ? storedPayment
+            : null
+        };
+    });
+    t.mock.method(FeeVoucher, "findOne", () => ({
+        session: async () => ({
+            _id: voucherId,
+            studentId,
+            currency: "USD",
+            balanceMinor: 10000
+        })
+    }));
+    t.mock.method(FeeVoucher, "findOneAndUpdate", async (filter) => {
+        updateCount += 1;
+        updateFilter = filter;
+        return { _id: voucherId, balanceMinor: 6000, paidAmountMinor: 4000, status: "partial" };
+    });
+    t.mock.method(FeePayment.prototype, "save", async function savePayment() {
+        storedPayment = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    const input = {
+        idempotencyKey: "daily-register-2026-02-01-0001",
+        amountMinor: 4000,
+        method: "cash",
+        reference: "cash-register-1"
+    };
+    const first = await collectFeePayment(req, voucherId, input);
+    const retry = await collectFeePayment(req, voucherId, input);
+    assert.equal(first.replayed, false);
+    assert.equal(retry.replayed, true);
+    assert.equal(first.payment.receiptNumber, retry.payment.receiptNumber);
+    assert.equal(first.payment.amountMinor, 4000);
+    assert.equal(updateCount, 1);
+    assert.equal(updateFilter.schoolId, schoolId);
+    assert.deepEqual(updateFilter.balanceMinor, { $gte: 4000 });
+    assert.equal(auditEvent.action, "fee_payment.collected");
+    assert.deepEqual(paymentLookup, { schoolId, idempotencyKey: input.idempotencyKey });
+    assert.equal(FeePayment.schema.path("amountMinor").options.immutable, true);
+
+    await assert.rejects(collectFeePayment(req, voucherId, {
+        ...input,
+        amountMinor: 5000
+    }), {
+        statusCode: 409,
+        message: "Idempotency key was already used for a different payment"
+    });
+    await assert.rejects(collectFeePayment(req, voucherId, {
+        ...input,
+        idempotencyKey: "another-payment-request-key",
+        amountMinor: 10001
+    }), {
+        statusCode: 409,
+        message: "Payment exceeds the outstanding voucher balance"
+    });
+    assert.equal(updateCount, 1);
+});
+
+test("finance resource lookup filters by the authenticated school and finance endpoints require auth", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    let filter;
+    t.mock.method(FeeVoucher, "findOne", (query) => {
+        filter = query;
+        return { lean: async () => null };
+    });
+    await assert.rejects(getFeeVoucher({
+        school: { _id: schoolId },
+        user: { schoolId }
+    }, "64a000000000000000000002"), { statusCode: 404 });
+    assert.deepEqual(filter, { _id: "64a000000000000000000002", schoolId });
+    await request(app)
+        .get("/api/v1/finance/vouchers")
+        .expect(401);
+    await request(app)
+        .post("/api/v1/finance/vouchers/64a000000000000000000002/payments")
+        .send({})
+        .expect(401);
+});
+
+test("exam validation enforces grading coverage, valid marks, and conflict-free subject times", () => {
+    const exam = {
+        academicSessionId: "64a000000000000000000001",
+        classId: "64a000000000000000000002",
+        name: "Mid-year exam",
+        gradingScale: [
+            { minPercent: 0, maxPercent: 59.99, grade: "F" },
+            { minPercent: 59.99, maxPercent: 79.99, grade: "C" },
+            { minPercent: 79.99, maxPercent: 100, grade: "A" }
+        ],
+        subjects: [{
+            classSubjectId: "64a000000000000000000003",
+            examDate: "2026-03-01",
+            startTime: "09:00",
+            durationMinutes: 60,
+            maxMarks: 100,
+            passingMarks: 40
+        }]
+    };
+    assert.equal(examCreateSchema.safeParse(exam).success, true);
+    assert.equal(examCreateSchema.safeParse({
+        ...exam,
+        gradingScale: [
+            { minPercent: 0, maxPercent: 59, grade: "F" },
+            { minPercent: 60, maxPercent: 79, grade: "C" },
+            { minPercent: 80, maxPercent: 100, grade: "A" }
+        ]
+    }).success, false);
+    assert.equal(examCreateSchema.safeParse({
+        ...exam,
+        subjects: [
+            ...exam.subjects,
+            { ...exam.subjects[0], classSubjectId: "64a000000000000000000004", startTime: "09:30" }
+        ]
+    }).success, false);
+    assert.equal(examMarksSchema.safeParse({
+        classSubjectId: exam.subjects[0].classSubjectId,
+        records: [{ studentId: "64a000000000000000000005", marksObtained: 101 }]
+    }).success, true);
+});
+
+test("exam routes require authentication", async () => {
+    await request(app)
+        .get("/api/v1/exams")
+        .expect(401);
+    await request(app)
+        .post("/api/v1/exams/64a000000000000000000001/marks")
+        .send({})
+        .expect(401);
+});
+
+test("exam creation verifies tenant class assignments and snapshots a sorted grading scale", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const sessionId = "64a000000000000000000002";
+    const classId = "64a000000000000000000003";
+    const classSubjectId = "64a000000000000000000004";
+    const subjectId = "64a000000000000000000005";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: "64a000000000000000000006", schoolId, role: "school_admin" }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    const sessionResult = {
+        _id: sessionId,
+        status: "active",
+        startDate: new Date("2026-01-01T00:00:00.000Z"),
+        endDate: new Date("2026-12-31T00:00:00.000Z")
+    };
+    let subjectFilter;
+    let examRecord;
+    let auditEvent;
+    const query = (value) => ({ session: async () => value });
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(AcademicSession, "findOne", () => query(sessionResult));
+    t.mock.method(AcademicClass, "findOne", () => query({ _id: classId, isActive: true }));
+    t.mock.method(ClassSubject, "find", (filter) => {
+        subjectFilter = filter;
+        return query([{ _id: classSubjectId, subjectId, schoolId }]);
+    });
+    t.mock.method(Exam.prototype, "save", async function saveExam() {
+        examRecord = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    const result = await createExam(req, {
+        academicSessionId: sessionId,
+        classId,
+        name: "Mid-year exam",
+        gradingScale: [
+            { minPercent: 80, maxPercent: 100, grade: "A" },
+            { minPercent: 0, maxPercent: 60, grade: "F" },
+            { minPercent: 60, maxPercent: 80, grade: "C" }
+        ],
+        subjects: [{
+            classSubjectId,
+            examDate: "2026-03-01",
+            startTime: "09:00",
+            durationMinutes: 60,
+            maxMarks: 100,
+            passingMarks: 40
+        }]
+    });
+    assert.equal(subjectFilter.schoolId, schoolId);
+    assert.equal(examRecord.schoolId.toString(), schoolId);
+    assert.deepEqual(examRecord.gradingScale.map(({ grade }) => grade), ["F", "C", "A"]);
+    assert.equal(result.subjects[0].subjectId.toString(), subjectId);
+    assert.equal(auditEvent.action, "exam.created");
+});
+
+test("marks entry is assigned-teacher scoped, tenant-bound, and validates maximum marks", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const examId = "64a000000000000000000002";
+    const classSubjectId = "64a000000000000000000003";
+    const studentId = "64a000000000000000000004";
+    const teacherId = "64a000000000000000000005";
+    const exam = {
+        _id: examId,
+        schoolId,
+        academicSessionId: "64a000000000000000000006",
+        classId: "64a000000000000000000007",
+        status: "scheduled",
+        subjects: [{ classSubjectId, maxMarks: 100 }]
+    };
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: teacherId, schoolId, role: "teacher" }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let classSubjectFilter;
+    let studentFilter;
+    let operations;
+    let auditEvent;
+    const query = (value) => ({ session: async () => value });
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(Exam, "findOne", () => query(exam));
+    t.mock.method(ClassSubject, "findOne", (filter) => {
+        classSubjectFilter = filter;
+        return query({ _id: classSubjectId, teacherId: "64a000000000000000000099" });
+    });
+    const studentQuery = {
+        session() { return this; },
+        select: async () => [{ _id: studentId }]
+    };
+    t.mock.method(Student, "find", (filter) => {
+        studentFilter = filter;
+        return studentQuery;
+    });
+    t.mock.method(ExamMark, "bulkWrite", async (value) => {
+        operations = value;
+        return {};
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    await assert.rejects(enterExamMarks(req, examId, {
+        classSubjectId,
+        records: [{ studentId, marksObtained: 80 }]
+    }), { statusCode: 403 });
+    assert.equal(classSubjectFilter.schoolId, schoolId);
+
+    t.mock.method(ClassSubject, "findOne", () => query({ _id: classSubjectId, teacherId }));
+    const result = await enterExamMarks(req, examId, {
+        classSubjectId,
+        records: [{ studentId, marksObtained: 80 }]
+    });
+    assert.equal(result.saved, 1);
+    assert.equal(studentFilter.schoolId, schoolId);
+    assert.equal(operations[0].updateOne.filter.schoolId, schoolId);
+    assert.equal(auditEvent.action, "exam.marks.entered");
+    await assert.rejects(enterExamMarks(req, examId, {
+        classSubjectId,
+        records: [{ studentId, marksObtained: 101 }]
+    }), { statusCode: 400 });
+});
+
+test("published report cards calculate subject totals and grades from tenant-scoped marks", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const examId = "64a000000000000000000002";
+    const studentId = "64a000000000000000000003";
+    const subjectId = "64a000000000000000000004";
+    const classSubjectId = "64a000000000000000000005";
+    const exam = {
+        _id: examId,
+        schoolId,
+        name: "Mid-year exam",
+        status: "published",
+        gradingScale: [
+            { minPercent: 0, maxPercent: 60, grade: "F" },
+            { minPercent: 60, maxPercent: 80, grade: "C" },
+            { minPercent: 80, maxPercent: 100, grade: "A" }
+        ],
+        subjects: [{ classSubjectId, subjectId, maxMarks: 100, passingMarks: 40 }]
+    };
+    let studentFilter;
+    const query = (value) => ({ select() { return this; }, lean: async () => value });
+    t.mock.method(Exam, "findOne", async () => exam);
+    t.mock.method(Student, "findOne", (filter) => {
+        studentFilter = filter;
+        return query({
+            _id: studentId,
+            admissionNumber: "ST-1",
+            firstName: "Rina",
+            lastName: "Student"
+        });
+    });
+    t.mock.method(ExamMark, "exists", async () => true);
+    t.mock.method(ExamMark, "find", () => ({
+        lean: async () => [{
+            studentId,
+            classSubjectId,
+            marksObtained: 82,
+            remarks: "Good work"
+        }]
+    }));
+    t.mock.method(ExamMark, "distinct", async () => [studentId]);
+    t.mock.method(Student, "find", () => query([{
+        _id: studentId,
+        admissionNumber: "ST-1",
+        firstName: "Rina",
+        lastName: "Student"
+    }]));
+    t.mock.method(Subject, "find", () => query([{ _id: subjectId, name: "Mathematics" }]));
+
+    const report = await getStudentReportCard({
+        school: { _id: schoolId },
+        user: { schoolId }
+    }, examId, studentId);
+    assert.equal(studentFilter.schoolId, schoolId);
+    assert.equal(report.totalObtained, 82);
+    assert.equal(report.totalMaximum, 100);
+    assert.equal(report.percentage, 82);
+    assert.equal(report.grade, "A");
+    assert.equal(report.subjects[0].subject, "Mathematics");
+    assert.equal(report.passed, true);
+});
+
+test("school operations validators reject invalid dates, quantities, and empty notification audiences", () => {
+    const calendar = {
+        title: "Founder's Day",
+        type: "holiday",
+        startsAt: "2026-12-01",
+        endsAt: "2026-12-01"
+    };
+    assert.equal(calendarEventCreateSchema.safeParse(calendar).success, true);
+    assert.equal(calendarEventCreateSchema.safeParse({
+        ...calendar,
+        startsAt: "2026-12-02",
+        endsAt: "2026-12-01"
+    }).success, false);
+    assert.equal(inventoryMovementSchema.safeParse({
+        type: "issued",
+        quantity: 0
+    }).success, false);
+    assert.equal(libraryLoanCreateSchema.safeParse({
+        bookId: "64a000000000000000000001",
+        studentId: "64a000000000000000000002",
+        dueAt: "2026-02-31"
+    }).success, false);
+    assert.equal(announcementCreateSchema.safeParse({
+        title: "Notice",
+        body: "School is closed.",
+        audience: []
+    }).success, false);
+});
+
+test("calendar event creation and list visibility remain school- and audience-scoped", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const actorUserId = "64a000000000000000000002";
+    const branchId = "64a000000000000000000003";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: actorUserId, schoolId, role: "principal" }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let eventRecord;
+    let auditEvent;
+    let eventFilter;
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(School, "findById", () => ({
+        session: async () => ({ _id: schoolId, branches: [{ _id: branchId }] })
+    }));
+    t.mock.method(CalendarEvent.prototype, "save", async function saveEvent() {
+        eventRecord = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    const created = await createCalendarEvent(req, {
+        title: "Exam week",
+        type: "exam",
+        startsAt: "2026-12-01",
+        endsAt: "2026-12-05",
+        branchId,
+        audience: ["principal", "teacher"]
+    });
+    assert.equal(eventRecord.schoolId.toString(), schoolId);
+    assert.equal(eventRecord.startsAt.toISOString(), "2026-12-01T00:00:00.000Z");
+    assert.equal(created.branchId.toString(), branchId);
+    assert.equal(auditEvent.action, "calendar.event.created");
+
+    t.mock.method(CalendarEvent, "find", (filter) => {
+        eventFilter = filter;
+        return {
+            sort() { return this; },
+            skip() { return this; },
+            limit() { return this; },
+            lean: async () => []
+        };
+    });
+    t.mock.method(CalendarEvent, "countDocuments", async () => 0);
+    await listCalendarEvents(req, {
+        from: "2026-12-01",
+        to: "2026-12-05",
+        search: "Founder's Day",
+        page: 1,
+        limit: 25
+    });
+    assert.equal(eventFilter.schoolId, schoolId);
+    assert.equal(eventFilter.audience, "principal");
+    assert.equal(eventFilter.startsAt.$lte.toISOString(), "2026-12-05T23:59:59.999Z");
+    assert.ok(eventFilter.$and[0].$or[0].title);
+});
+
+test("inventory issue is tenant-bound, rejects stock underflow, and writes immutable ledger entries", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const itemId = "64a000000000000000000002";
+    const actorUserId = "64a000000000000000000003";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: actorUserId, schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let itemFilter;
+    let ledgerRecord;
+    let auditEvent;
+    const updatedItem = {
+        _id: itemId,
+        schoolId,
+        quantityOnHand: 7,
+        toObject() { return this; }
+    };
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(InventoryItem, "findOneAndUpdate", (filter) => {
+        itemFilter = filter;
+        return Promise.resolve(updatedItem);
+    });
+    t.mock.method(InventoryTransaction.prototype, "save", async function saveMovement() {
+        ledgerRecord = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    const result = await recordInventoryMovement(req, itemId, {
+        type: "issued",
+        quantity: 3,
+        reference: "REQ-22"
+    });
+    assert.equal(itemFilter.schoolId, schoolId);
+    assert.deepEqual(itemFilter.quantityOnHand, { $gte: 3 });
+    assert.equal(ledgerRecord.schoolId.toString(), schoolId);
+    assert.equal(ledgerRecord.type, "issued");
+    assert.equal(result.item.quantityOnHand, 7);
+    assert.equal(auditEvent.action, "inventory.issued");
+    assert.equal(InventoryTransaction.schema.path("quantity").options.immutable, true);
+
+    t.mock.method(InventoryItem, "findOneAndUpdate", async () => null);
+    t.mock.method(InventoryItem, "exists", () => ({ session: async () => ({ _id: itemId }) }));
+    await assert.rejects(recordInventoryMovement(req, itemId, {
+        type: "issued",
+        quantity: 100
+    }), {
+        statusCode: 409,
+        message: "Inventory issue exceeds available quantity or item is inactive"
+    });
+});
+
+test("library issue and return update copy counts atomically and reject cross-tenant students", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const bookId = "64a000000000000000000002";
+    const studentId = "64a000000000000000000003";
+    const loanId = "64a000000000000000000004";
+    const actorUserId = "64a000000000000000000005";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: actorUserId, schoolId }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let studentFilter;
+    let bookFilter;
+    let savedLoan;
+    let loanReturnFilter;
+    let bookReturnFilter;
+    let auditEvent;
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(Student, "findOne", (filter) => {
+        studentFilter = filter;
+        return { session: async () => ({ _id: studentId }) };
+    });
+    t.mock.method(LibraryBook, "findOneAndUpdate", (filter) => {
+        bookFilter = filter;
+        return Promise.resolve({ _id: bookId, copiesAvailable: 1 });
+    });
+    t.mock.method(LibraryLoan.prototype, "save", async function saveLoan() {
+        savedLoan = this;
+        return this;
+    });
+    t.mock.method(LibraryLoan, "findOneAndUpdate", (filter) => {
+        loanReturnFilter = filter;
+        return Promise.resolve({
+            _id: loanId,
+            bookId,
+            studentId,
+            status: "returned",
+            toObject() { return this; }
+        });
+    });
+    t.mock.method(LibraryBook, "updateOne", (filter) => {
+        bookReturnFilter = filter;
+        return Promise.resolve({ modifiedCount: 1 });
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+
+    const loan = await issueLibraryBook(req, {
+        bookId,
+        studentId,
+        dueAt: "2099-01-01"
+    });
+    assert.equal(studentFilter.schoolId, schoolId);
+    assert.equal(bookFilter.schoolId, schoolId);
+    assert.deepEqual(bookFilter.copiesAvailable, { $gt: 0 });
+    assert.equal(savedLoan.schoolId.toString(), schoolId);
+    assert.equal(loan.studentId.toString(), studentId);
+    const returned = await returnLibraryBook(req, loanId);
+    assert.equal(loanReturnFilter.schoolId, schoolId);
+    assert.equal(loanReturnFilter.status, "checked_out");
+    assert.equal(bookReturnFilter.schoolId, schoolId);
+    assert.equal(returned.status, "returned");
+    assert.equal(auditEvent.action, "library.book.returned");
+});
+
+test("announcements persist in-app audience filters without external delivery claims", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const actorUserId = "64a000000000000000000002";
+    const req = {
+        school: { _id: schoolId },
+        user: { _id: actorUserId, schoolId, role: "school_admin" }
+    };
+    const transaction = {
+        withTransaction: async (callback) => callback(),
+        endSession: async () => {}
+    };
+    let announcement;
+    let auditEvent;
+    let filter;
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(Announcement.prototype, "save", async function saveAnnouncement() {
+        announcement = this;
+        return this;
+    });
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() {
+        auditEvent = this;
+        return this;
+    });
+    await createAnnouncement(req, {
+        title: "School closed",
+        body: "The school is closed tomorrow.",
+        audience: ["teacher", "parent"],
+        expiresAt: "2099-12-31"
+    });
+    assert.equal(announcement.schoolId.toString(), schoolId);
+    assert.deepEqual(announcement.audience, ["teacher", "parent"]);
+    assert.equal(auditEvent.action, "announcement.created");
+
+    t.mock.method(Announcement, "find", (query) => {
+        filter = query;
+        return {
+            sort() { return this; },
+            skip() { return this; },
+            limit() { return this; },
+            lean: async () => []
+        };
+    });
+    t.mock.method(Announcement, "countDocuments", async () => 0);
+    await listAnnouncements({
+        school: { _id: schoolId },
+        user: { schoolId, role: "parent" }
+    }, { page: 1, limit: 25, search: "closed" });
+    assert.equal(filter.schoolId, schoolId);
+    assert.equal(filter.audience, "parent");
+    assert.ok(filter.$or);
+    assert.ok(filter.$and[0].$or[0].title);
+});
+
+test("operations endpoints require authentication", async () => {
+    await request(app)
+        .get("/api/v1/operations/calendar?from=2026-12-01&to=2026-12-31")
+        .expect(401);
+    await request(app)
+        .post("/api/v1/operations/library/loans")
+        .send({})
+        .expect(401);
+});
+
+test("dashboard and operational reports aggregate real records within the authenticated tenant", async (t) => {
+    const schoolId = "64a000000000000000000001";
+    const req = {
+        school: { _id: schoolId },
+        user: { schoolId, role: "principal" }
+    };
+    const filters = [];
+    const aggregate = (filter) => {
+        filters.push(filter[0].$match);
+        return Promise.resolve([{ _id: "enrolled", count: 4 }]);
+    };
+    t.mock.method(Student, "aggregate", aggregate);
+    t.mock.method(User, "aggregate", aggregate);
+    t.mock.method(StudentAttendance, "aggregate", aggregate);
+    t.mock.method(StaffAttendance, "aggregate", aggregate);
+    t.mock.method(FeePayment, "aggregate", aggregate);
+    t.mock.method(FeeVoucher, "aggregate", aggregate);
+    t.mock.method(Exam, "countDocuments", async (filter) => {
+        assert.equal(filter.schoolId, schoolId);
+        return 2;
+    });
+    t.mock.method(AcademicSession, "findOne", () => ({
+        select() { return this; },
+        lean: async () => ({ _id: "64a000000000000000000002", name: "2026-27" })
+    }));
+
+    const dashboard = await getDashboardSummary(req);
+    assert.equal(dashboard.studentsByStatus[0].count, 4);
+    assert.equal(dashboard.scheduledExams, 2);
+    assert.ok(filters.length >= 6);
+    assert.ok(filters.every((filter) => String(filter.schoolId) === schoolId));
+
+    filters.length = 0;
+    t.mock.method(Student, "aggregate", async (pipeline) => {
+        filters.push(pipeline[0].$match);
+        return [];
+    });
+    await getStudentStatistics(req);
+    assert.ok(filters.every((filter) => filter.schoolId === schoolId));
+
+    filters.length = 0;
+    t.mock.method(StudentAttendance, "aggregate", aggregate);
+    t.mock.method(StaffAttendance, "aggregate", aggregate);
+    await getAttendanceStatistics(req, { from: "2026-01-01", to: "2026-01-31" });
+    assert.equal(filters.length, 2);
+    assert.ok(filters.every((filter) => filter.schoolId === schoolId));
+});
+
+test("reports endpoints require authentication", async () => {
+    await request(app)
+        .get("/api/v1/reports/dashboard")
+        .expect(401);
 });

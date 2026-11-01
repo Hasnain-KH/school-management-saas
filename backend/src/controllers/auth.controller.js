@@ -1,4 +1,9 @@
 import { login, logout, refreshTokens, registerSchool } from "../services/auth.service.js";
+import {
+    completeAccountAction,
+    requestEmailVerification,
+    requestPasswordRecovery
+} from "../services/account-security.service.js";
 import { sendSuccess } from "../utils/responses.js";
 
 export const register = async (req, res) => {
@@ -40,4 +45,24 @@ export const currentUser = async (req, res) => {
         : null;
 
     return sendSuccess(res, 200, { user, school });
+};
+
+export const requestPasswordReset = async (req, res) => {
+    const result = await requestPasswordRecovery(req.body);
+    return sendSuccess(res, 202, result, result.message);
+};
+
+export const requestVerification = async (req, res) => {
+    const result = await requestEmailVerification(req.body);
+    return sendSuccess(res, 202, result, result.message);
+};
+
+export const resetPassword = async (req, res) => {
+    await completeAccountAction("password_reset", req.body.token, req.body.password);
+    return sendSuccess(res, 200, null, "Password has been reset; sign in again");
+};
+
+export const verifyEmail = async (req, res) => {
+    await completeAccountAction("email_verification", req.body.token);
+    return sendSuccess(res, 200, null, "Email address verified");
 };

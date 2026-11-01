@@ -11,6 +11,7 @@ import StudentGuardian from "../models/student-guardian.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { tenantFilter } from "../middleware/authorization.middleware.js";
 import { withTransaction } from "../utils/transaction.js";
+import { assertPlanCapacity } from "../utils/plan-limits.js";
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -162,6 +163,7 @@ export const listStudents = async (req, input) => {
 export const admitStudent = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
+        await assertPlanCapacity(req, session, "students");
         const placementInput = {
             academicSessionId: input.academicSessionId,
             classId: input.classId,

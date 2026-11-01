@@ -5,6 +5,9 @@ import { getConfig } from "../config/env.js";
 import AuditLog from "../models/audit-log.model.js";
 import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
+import SubscriptionPlan from "../models/subscription-plan.model.js";
+import { isEmailDeliveryConfigured } from "./email-delivery.provider.js";
+import { requestEmailVerification } from "./account-security.service.js";
 import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -15,7 +18,8 @@ const toPublicUser = (user) => ({
     name: user.name,
     email: user.email,
     role: user.role,
-    schoolId: user.schoolId?.toString() ?? null
+    schoolId: user.schoolId?.toString() ?? null,
+    emailVerified: Boolean(user.emailVerifiedAt)
 });
 
 export const toPublicSchool = (school) => ({
@@ -93,6 +97,10 @@ const recordRegistration = async (school, user, session) => {
 };
 
 export const registerSchool = async (input) => {
+    const trialPlan = await SubscriptionPlan.findOne({ isActive: true, isDefaultTrial: true });
+    if (!trialPlan) {
+        throw new HttpError(503, "School registration is unavailable until a default trial plan is configured");
+    }
     const session = await mongoose.startSession();
     let result;
 
@@ -110,9 +118,12 @@ export const registerSchool = async (input) => {
                 phone: input.phone,
                 status: "trial",
                 subscription: {
-                    plan: "trial",
+                    planId: trialPlan._id,
+                    plan: trialPlan.code,
                     status: "trial",
-                    trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+                    trialEndsAt: new Date(
+                        Date.now() + trialPlan.trialDurationDays * 24 * 60 * 60 * 1000
+                    )
                 }
             });
             await school.save({ session });
@@ -144,6 +155,14 @@ export const registerSchool = async (input) => {
         await session.endSession();
     }
 
+    if (isEmailDeliveryConfigured()) {
+        await requestEmailVerification({ email: input.email, schoolSlug: result.school.slug });
+        return {
+            user: result.user,
+            school: result.school,
+            emailVerificationRequired: true
+        };
+    }
     return result;
 };
 
@@ -179,6 +198,11 @@ export const login = async ({ schoolSlug, email, password }) => {
     }
     if (user.status !== "active") {
         throw new HttpError(403, "This account is disabled");
+    }
+    if (user.role !== "platform_super_admin"
+        && isEmailDeliveryConfigured()
+        && !user.emailVerifiedAt) {
+        throw new HttpError(403, "Email address verification is required");
     }
     if (user.role === "platform_super_admin") {
         if (schoolSlug || user.schoolId) {

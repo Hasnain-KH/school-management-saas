@@ -29,10 +29,12 @@ const schoolSchema = new mongoose.Schema(
             required: true
         },
         subscription: {
-            plan: { type: String, enum: ["trial", "starter", "professional", "enterprise"], default: "trial" },
+            planId: { type: mongoose.Schema.Types.ObjectId, ref: "SubscriptionPlan" },
+            plan: { type: String, lowercase: true, trim: true, maxlength: 32, default: "trial" },
             status: { type: String, enum: ["trial", "active", "past_due", "canceled"], default: "trial" },
             trialEndsAt: { type: Date },
-            currentPeriodEnd: { type: Date }
+            currentPeriodEnd: { type: Date },
+            limitRevision: { type: Number, default: 0, select: false }
         },
         branches: {
             type: [branchSchema],
@@ -47,6 +49,7 @@ const schoolSchema = new mongoose.Schema(
 );
 
 schoolSchema.index({ status: 1, "subscription.trialEndsAt": 1 });
+schoolSchema.index({ "subscription.planId": 1, status: 1 });
 
 const School = mongoose.models.School ?? mongoose.model("School", schoolSchema);
 export default School;

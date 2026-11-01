@@ -2,7 +2,9 @@ import jwt from "jsonwebtoken";
 import { getConfig } from "../config/env.js";
 import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
+import SubscriptionPlan from "../models/subscription-plan.model.js";
 import User from "../models/user.model.js";
+import { isEmailDeliveryConfigured } from "../services/email-delivery.provider.js";
 import { HttpError } from "../utils/http-error.js";
 
 const unauthorized = () => new HttpError(401, "Authentication is required");
@@ -34,6 +36,11 @@ export const requireAuth = async (req, res, next) => {
         if (!session || !user || user.status !== "active" || String(session.userId) !== String(user._id)) {
             return next(unauthorized());
         }
+        if (user.role !== "platform_super_admin"
+            && isEmailDeliveryConfigured()
+            && !user.emailVerifiedAt) {
+            return next(new HttpError(403, "Email address verification is required"));
+        }
 
         req.authSession = session;
         let school = null;
@@ -58,8 +65,15 @@ export const requireAuth = async (req, res, next) => {
             )) {
                 return next(new HttpError(403, "School subscription is not active"));
             }
+            req.subscriptionPlan = school.subscription.planId
+                ? await SubscriptionPlan.findById(school.subscription.planId).lean()
+                : school.subscription.plan
+                    ? await SubscriptionPlan.findOne({ code: school.subscription.plan }).lean()
+                    : null;
         } else if (user.schoolId || session.schoolId) {
             return next(unauthorized());
+        } else {
+            req.subscriptionPlan = null;
         }
 
         req.user = user;

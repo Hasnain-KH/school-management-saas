@@ -1,7 +1,7 @@
 import express from "express";
 import * as controller from "../controllers/student.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
-import { requirePermission, requireTenant } from "../middleware/authorization.middleware.js";
+import { requirePermission, requirePlanFeature, requireTenant } from "../middleware/authorization.middleware.js";
 import { objectIdSchema, validate } from "../validators/common.validator.js";
 import {
     guardianCreateSchema,
@@ -26,7 +26,7 @@ const studentGuardianParams = z.object({
     guardianId: objectIdSchema
 }).strict();
 
-router.use(requireAuth, requireTenant);
+router.use(requireAuth, requireTenant, requirePlanFeature("students"));
 
 router.get("/", requirePermission("students:read"), validate(studentQuerySchema, "query"), controller.getStudents);
 router.post("/", requirePermission("students:manage"), validate(studentAdmissionSchema), controller.admitStudent);

@@ -19,6 +19,21 @@ import StudentGuardian from "../src/models/student-guardian.model.js";
 import Guardian from "../src/models/guardian.model.js";
 import TimetableEntry from "../src/models/timetable-entry.model.js";
 import User from "../src/models/user.model.js";
+import FeeCategory from "../src/models/fee-category.model.js";
+import FeeStructure from "../src/models/fee-structure.model.js";
+import StudentFeeAssignment from "../src/models/student-fee-assignment.model.js";
+import FeeVoucher from "../src/models/fee-voucher.model.js";
+import FeePayment from "../src/models/fee-payment.model.js";
+import Exam from "../src/models/exam.model.js";
+import ExamMark from "../src/models/exam-mark.model.js";
+import CalendarEvent from "../src/models/calendar-event.model.js";
+import InventoryItem from "../src/models/inventory-item.model.js";
+import InventoryTransaction from "../src/models/inventory-transaction.model.js";
+import LibraryBook from "../src/models/library-book.model.js";
+import LibraryLoan from "../src/models/library-loan.model.js";
+import Announcement from "../src/models/announcement.model.js";
+import SubscriptionPlan from "../src/models/subscription-plan.model.js";
+import AccountActionToken from "../src/models/account-action-token.model.js";
 
 const models = [
     School,
@@ -38,7 +53,22 @@ const models = [
     StudentAttendance,
     StaffAttendance,
     Guardian,
-    StudentGuardian
+    StudentGuardian,
+    FeeCategory,
+    FeeStructure,
+    StudentFeeAssignment,
+    FeeVoucher,
+    FeePayment,
+    Exam,
+    ExamMark,
+    CalendarEvent,
+    InventoryItem,
+    InventoryTransaction,
+    LibraryBook,
+    LibraryLoan,
+    Announcement,
+    SubscriptionPlan,
+    AccountActionToken
 ];
 
 const createIndexes = async () => {

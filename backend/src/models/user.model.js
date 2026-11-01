@@ -14,6 +14,7 @@ const userSchema = new mongoose.Schema(
         email: { type: String, required: true, lowercase: true, trim: true, maxlength: 254 },
         phone: { type: String, trim: true, maxlength: 30 },
         jobTitle: { type: String, trim: true, maxlength: 80 },
+        emailVerifiedAt: { type: Date },
         passwordHash: { type: String, required: true, select: false },
         role: {
             type: String,

@@ -29,6 +29,23 @@ export const refreshSchema = z.object({
     refreshToken: z.string().min(1).max(4096)
 }).strict();
 
+export const passwordRecoverySchema = z.object({
+    email: emailSchema,
+    schoolSlug: slugSchema.optional()
+}).strict();
+export const emailVerificationRequestSchema = passwordRecoverySchema;
+
+export const accountActionTokenSchema = z.object({
+    token: z.string().min(40).max(100),
+    password: passwordSchema.optional()
+}).strict();
+
+export const passwordResetSchema = accountActionTokenSchema.extend({
+    password: passwordSchema
+}).strict();
+
+export const emailVerificationSchema = accountActionTokenSchema.omit({ password: true }).strict();
+
 const addressSchema = z.object({
     line1: z.string().trim().max(160).optional(),
     city: z.string().trim().max(100).optional(),
