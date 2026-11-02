@@ -7,12 +7,6 @@
       "includeFiles": "backend/src/**"
     }
   },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
