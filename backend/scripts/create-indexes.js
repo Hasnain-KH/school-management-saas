@@ -34,6 +34,10 @@ import LibraryLoan from "../src/models/library-loan.model.js";
 import Announcement from "../src/models/announcement.model.js";
 import SubscriptionPlan from "../src/models/subscription-plan.model.js";
 import AccountActionToken from "../src/models/account-action-token.model.js";
+import FixedAsset from "../src/models/fixed-asset.model.js";
+import FixedAssetAssignment from "../src/models/fixed-asset-assignment.model.js";
+import FixedAssetDepreciation from "../src/models/fixed-asset-depreciation.model.js";
+import FeeReminderDelivery from "../src/models/fee-reminder-delivery.model.js";
 
 const models = [
     School,
@@ -68,7 +72,11 @@ const models = [
     LibraryLoan,
     Announcement,
     SubscriptionPlan,
-    AccountActionToken
+    AccountActionToken,
+    FixedAsset,
+    FixedAssetAssignment,
+    FixedAssetDepreciation,
+    FeeReminderDelivery
 ];
 
 const createIndexes = async () => {

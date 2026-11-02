@@ -1,6 +1,6 @@
 # API reference
 
-Base path: `/api/v1`. Send JSON with `Content-Type: application/json`. Authenticated requests use `Authorization: Bearer <accessToken>`. Error responses do not include stack traces or database details.
+Base path: `/api/v1`. Send JSON with `Content-Type: application/json`. Authentication uses server-set HttpOnly cookies; do not send or store bearer tokens. Browser requests must include credentials. Error responses do not include stack traces or database details.
 
 ## Health
 
@@ -12,19 +12,20 @@ Base path: `/api/v1`. Send JSON with `Content-Type: application/json`. Authentic
 
 | Method | Path | Access | Body |
 |---|---|---|---|
+| GET | `/auth/csrf` | Public | —; returns a CSRF token and sets the CSRF cookie |
 | POST | `/auth/register` | Public; rate limited | `schoolName`, optional `schoolSlug`, `email`, optional `phone`, `adminName`, `password` |
 | POST | `/auth/login` | Public; rate limited | `schoolSlug`, `email`, `password` for school accounts; omit `schoolSlug` for a provisioned platform super admin |
-| POST | `/auth/refresh` | Public; rate limited | `refreshToken` |
-| POST | `/auth/logout` | Access token | `refreshToken` |
+| POST | `/auth/refresh` | Refresh cookie; rate limited | — |
+| POST | `/auth/logout` | Refresh cookie | —; remains usable after access-cookie expiration |
 | POST | `/auth/password-recovery` | Public; rate limited | `email`; school accounts also require `schoolSlug` |
 | POST | `/auth/password-reset` | Public; rate limited | `token`, new `password` |
 | POST | `/auth/email-verification` | Public; rate limited | `email`; school accounts also require `schoolSlug`; asks the configured provider to deliver a verification link |
 | POST | `/auth/email-verification/confirm` | Public; rate limited | `token` |
-| GET | `/auth/me` | Access token | — |
+| GET | `/auth/me` | Access cookie | — |
 
-School registration atomically creates the school, its first school-admin account, a trial whose duration comes from the active default trial plan, an initial main branch, an audit event, and a persisted token session. A platform admin must first configure an active default trial plan or registration returns `503`. MongoDB transactions are required. The registration/login response contains an access token and a refresh token when email delivery is not configured; when configured, registration sends a verification email and returns no tokens until the account is verified.
+School registration atomically creates the school, its first school-admin account, a trial whose duration comes from the active default trial plan, an initial main branch, an audit event, and a persisted token session. A platform admin must first configure an active default trial plan or registration returns `503`. MongoDB transactions are required. Login, refresh, and immediately authenticated registration set scoped HttpOnly access/refresh cookies and never return token values in JSON. If email delivery is configured, registration sends a verification email and does not authenticate the account until verification.
 
-Refresh tokens rotate on use. Both access and refresh tokens are backed by a persisted session, so logout or rotation invalidates the corresponding access token immediately. Refresh tokens are stored only as SHA-256 digests. Access tokens expire after 15 minutes by default; refresh tokens expire after 7 days.
+The access cookie is scoped to `/api/v1`; the refresh cookie is scoped to `/api/v1/auth`. Both are host-only, HttpOnly, SameSite=Lax, and Secure in production, with lifetimes matching their JWTs (15-minute access and 7-day refresh defaults). The separate CSRF cookie is not an authentication credential. For login, registration, refresh, logout, and all unsafe cookie-authenticated API requests, send its signed value in `X-CSRF-Token` and include the exact allowed `Origin`; CORS allows credentials only for configured exact origins. Refresh rotates tokens and persists only SHA-256 refresh-token digests. Reuse of a previously rotated token revokes active sessions in that refresh family. Logout revokes through the refresh cookie and clears both auth cookies, even when the access cookie has expired.
 
 Recovery and verification tokens are cryptographically random, stored only as SHA-256 digests, expire after 30 minutes, and are single-use. Successful password reset revokes the user's persisted sessions. Recovery responses do not disclose whether an account exists. No email provider is configured: delivery-request routes explicitly return `503` and do not persist or expose a token until a real provider is installed. Tests use a mocked provider only. Once configured, school accounts must verify their email before using authenticated school routes.
 
@@ -48,8 +49,11 @@ Plan changes, subscription assignment, school status changes, and their audit re
 |---|---|---|---|
 | GET | `/schools/me` | Authenticated school member | — |
 | PATCH | `/schools/me` | School admin | At least one of `name`, `phone`, `address`, `settings.attendanceLateGraceMinutes`, `settings.attendanceStartTime` |
+| GET | `/schools/subscription` | Authenticated school member | — |
 
 Profile writes use the authenticated user's school ID in the database filter. Client-provided tenant IDs are rejected by strict validation. Administrative profile updates are recorded in the audit collection.
+
+The subscription endpoint returns the school's current plan entitlements and database-derived student, active-staff, and branch usage. It is read-only; only platform administrators can change plans or lifecycle status.
 
 ## Academic setup
 
@@ -118,7 +122,7 @@ Database unique indexes enforce one student or staff attendance record per schoo
 
 ## Fees and finance
 
-Finance routes require an authenticated school tenant with the `fees` plan feature. School admins can manage definitions, assignments, vouchers, and collections. Principals have read-only finance access. Teachers and parents are denied finance access. Amounts are integer minor units (for example cents); no floating-point currency amounts are accepted. Collections are offline/manual records only; no online payment provider is integrated.
+Finance routes require an authenticated school tenant with the `fees` plan feature. School admins can manage definitions, assignments, vouchers, and collections. Principals have read-only finance access. Teachers and parents cannot access school finance records through finance routes. Amounts are integer minor units (for example cents); no floating-point currency amounts are accepted. Collections are offline/manual records only; no online payment provider is integrated.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -133,12 +137,13 @@ Finance routes require an authenticated school tenant with the `fees` plan featu
 | GET | `/finance/receipts/:receiptNumber` | Retrieve the same-tenant payment receipt record |
 | GET | `/finance/reports/overdue?asOf=YYYY-MM-DD&page=1&limit=25` | Paginated overdue vouchers and outstanding balances grouped by currency |
 | GET | `/finance/reports/collections?from=YYYY-MM-DD&to=YYYY-MM-DD` | Actual collected totals grouped by currency and payment method; optional `classId` |
+| POST | `/finance/reminders/overdue/dispatch` | Admin-triggered, tenant-scoped reminder job; body may include `asOf` and `limit` (maximum 500) |
 
-Voucher creation snapshots fee lines and discount amounts. Generation can be safely retried; existing assignment/period vouchers are skipped, and unique indexes arbitrate concurrent generation. Payment recording atomically decrements the outstanding balance, appends an immutable receipt transaction, and audits the collection. A retry with an identical idempotency key and payload returns the original receipt without collecting twice. Voucher and payment writes require MongoDB transactions. Overdue reporting is implemented, but automatic reminder delivery is not: no email/SMS provider or delivery worker has been selected.
+Voucher creation snapshots fee lines and discount amounts. Generation can be safely retried; existing assignment/period vouchers are skipped, and unique indexes arbitrate concurrent generation. Payment recording atomically decrements the outstanding balance, appends an immutable receipt transaction, and audits the collection. A retry with an identical idempotency key and payload returns the original receipt without collecting twice. Voucher and payment writes require MongoDB transactions. The reminder endpoint requires a configured email provider implementing `sendOverdueFeeReminder`; otherwise it returns `503` without creating delivery records. Daily delivery attempts use persisted idempotency state and provider idempotency keys. The endpoint is a job entry point, not a scheduler; invoke it from an approved external scheduler. No provider or scheduler is configured by default.
 
 ## Exams and results
 
-Exam routes require an authenticated tenant and the `exams` plan feature. School admins and principals can create/publish exams and read results. Teachers can enter marks only for subjects assigned to them; no teacher can create or publish exams. Student/class-subject references are verified against the exam's tenant, class, and academic session.
+Exam routes require an authenticated tenant and the `exams` plan feature. School admins and principals can create/publish exams and read full results. Teachers can read only exams and subject results for their assigned class subjects, enter marks only for those subjects, and cannot create exams, publish results, or read full report cards. Student/class-subject references are verified against the exam's tenant, class, and academic session.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -168,7 +173,18 @@ These APIs use the authenticated school tenant and require the corresponding act
 | POST | `/operations/library/loans/:loanId/return` | Return a checked-out book and restore its available copy count atomically |
 | GET/POST | `/operations/announcements` | Paginated in-app feed or publish an announcement to selected school roles |
 
-Inventory changes are represented as immutable received/issued transactions. Loan/return workflows and inventory movements use transactions and audit events. Library overdue results are computed from open loans and due dates; no overdue messaging is delivered. Inventory models handle consumable stock rather than assignment/depreciation of fixed assets.
+Inventory changes are represented as immutable received/issued transactions. Loan/return workflows and inventory movements use transactions and audit events. Library overdue results are computed from open loans and due dates; no overdue messaging is delivered. Fixed assets use a separate register and append-only assignment/release history:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST | `/operations/assets` | Paginated fixed-asset register or add a tenant-owned asset |
+| POST | `/operations/assets/:assetId/assignments` | Assign an active asset to an active same-school staff member or enrolled student |
+| POST | `/operations/assets/:assetId/release` | Record an immutable release event |
+| POST | `/operations/assets/:assetId/depreciation` | Record one sequential straight-line monthly depreciation entry |
+| GET | `/operations/assets/:assetId/history` | Read assignment and depreciation history |
+| POST | `/operations/assets/:assetId/dispose` | Dispose an unassigned asset without deleting its history |
+
+Depreciation uses integer minor currency units, cost less salvage value, and useful life in months. Monthly postings must be sequential beginning in the acquisition month; duplicate, future, and out-of-order periods are rejected. Fixed assets require the `inventory` feature and `operations:read` or `operations:manage`.
 
 ## Reports and dashboard
 
@@ -182,11 +198,37 @@ These read-only reports require `reports:read` (school admins and principals) an
 | GET | `/reports/attendance?from=YYYY-MM-DD&to=YYYY-MM-DD` | Student and staff attendance counts by status for a range of up to 366 days |
 | GET | `/reports/academics` | Actual academic session, class, section, subject-assignment, and exam counts |
 | GET | `/reports/finance?from=YYYY-MM-DD&to=YYYY-MM-DD` | Actual collections by currency/payment method and outstanding vouchers by currency/status |
+| GET | `/reports/students/records` | Paginated student records; optional admission-date `from`/`to`, `classId`, `academicSessionId`, `studentId`, and lifecycle `status` filters |
+| GET | `/reports/attendance/records` | Paginated student attendance records; optional date, class, session, student, and attendance-status filters |
+| GET | `/reports/finance/collections` | Paginated payment receipts; optional received-date, class, student, and payment-method filters |
+| GET | `/reports/finance/dues` | Paginated outstanding vouchers; optional due-date, class, student, and unpaid/partial-status filters |
+| GET | `/reports/academics/classes` | Paginated enrollment counts by class, academic session, and student lifecycle status |
+| GET | `/reports/academics/results` | Paginated subject marks and published results; optional exam-date, class, session, student, and pass/fail filters |
 
-Fee collection/overdue reports are under `/finance/reports`; exam performance/report-card data is under `/exams`. These modules provide database-derived operational summaries, not a full export/report builder.
+All report data endpoints require `reports:read` and the `reports` plan feature. Query filters are validated and every source and referenced record is constrained to the authenticated school. Date ranges may span at most 366 days; `page` and `limit` use the common pagination rules (maximum 100). Responses contain real records and pagination metadata.
+
+## Parent portal and audit logs
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/portal/parent/students` | Parent account | List only students linked to a same-school Guardian with the parent's account email |
+| GET | `/portal/parent/students/:studentId/attendance?from=YYYY-MM-DD&to=YYYY-MM-DD` | Linked parent only | Up to 100 same-tenant attendance records |
+| GET | `/portal/parent/students/:studentId/fees` | Linked parent only | Read-only fee voucher balances and immutable payment history for the linked student |
+| GET | `/portal/parent/students/:studentId/results` | Linked parent only | Marks for published exams for the linked student's class |
+| GET | `/portal/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | Authenticated school member | Calendar events filtered to the caller's role audience |
+| GET | `/audit` | School admin with `audit:read` | Paginated school audit events, optionally filtered by `action`, `resourceType`, and date range |
+| GET | `/platform/audit` | Platform super admin | Paginated platform audit events |
+
+Parent access is denied unless the student-guardian relationship exists in the authenticated school. Every child-resource lookup additionally includes the authenticated school ID. Calendar audience filters are applied by the server, not trusted to caller-supplied role values.
+
+## Provider status and downloads
+
+Password recovery, email verification, and overdue reminders use provider interfaces but delivery is unavailable until an actual email adapter is configured. `payment-gateway.provider.js` and `document-storage.provider.js` define adapter contracts only; online checkout, webhook processing, and file-upload routes are not enabled. The frontend exports returned report data to CSV and Excel. PDF is a printable browser report; the user saves it using the browser's print-to-PDF option. No third-party delivery, payment, or storage is simulated.
+
+The React frontend lives in `frontend/`, defaults to `http://localhost:5000/api/v1`, and uses `VITE_API_URL` for another API origin. The interface provides role-specific navigation; server-side permissions remain authoritative.
 
 ## Limits and status codes
 
 The API has a global rate limit of 300 requests per IP per 15 minutes; authentication routes allow 10 per IP per 15 minutes. Common statuses: `200` success, `201` created, `202` accepted for delivery, `400` invalid input, `401` missing/invalid credentials, `403` forbidden or inactive tenant/feature, `404` unknown resource/route, `409` business conflict or duplicate record, `413` body too large, `429` rate limit exceeded, and `503` unavailable service (including unconfigured email delivery or trial plan).
 
-Email/SMS/push delivery (including actual password-recovery and verification email delivery), online payment processing, automatic overdue reminders, advanced report exports, fixed-asset assignment/depreciation, and document uploads are not implemented. Email action-token workflows are implemented but delivery-request endpoints return `503` until an actual provider is configured; token-confirmation endpoints are available for issued tokens.
+Email/SMS/push delivery (including actual password-recovery and verification email delivery), online payment processing, automatic overdue reminders, server-generated PDF reports, fixed-asset assignment/depreciation, and document uploads are not implemented. The frontend exports the displayed report records to CSV and Excel and uses browser print-to-PDF; it does not generate a server-side PDF. Email action-token workflows are implemented but delivery-request endpoints return `503` until an actual provider is configured; token-confirmation endpoints are available for issued tokens.

@@ -315,17 +315,35 @@ export const archiveClass = async (req, id) => {
     });
 };
 
-export const listSections = (req, input) =>
-    paginatedList(
-        Section,
-        tenantFilter(req, {
-            ...(input.academicSessionId && { academicSessionId: input.academicSessionId }),
-            ...(input.classId && { classId: input.classId }),
-            ...(input.branchId && { branchId: input.branchId }),
-            ...(input.isActive === undefined ? {} : { isActive: input.isActive })
-        }),
-        input
-    );
+export const listSections = async (req, input) => {
+    const schoolId = assertTenant(req);
+    const filter = tenantFilter(req, {
+        ...(input.academicSessionId && { academicSessionId: input.academicSessionId }),
+        ...(input.classId && { classId: input.classId }),
+        ...(input.branchId && { branchId: input.branchId }),
+        ...(input.isActive === undefined ? {} : { isActive: input.isActive })
+    });
+    if (req.user.role === "teacher") {
+        const [classIds, sectionIds] = await Promise.all([
+            ClassSubject.find({
+                schoolId,
+                teacherId: req.user._id,
+                isActive: true,
+                ...(input.academicSessionId && { academicSessionId: input.academicSessionId })
+            }).distinct("classId"),
+            ClassTeacherAssignment.find({
+                schoolId,
+                teacherId: req.user._id,
+                ...(input.academicSessionId && { academicSessionId: input.academicSessionId })
+            }).distinct("sectionId")
+        ]);
+        filter.$and = [
+            ...(filter.$and ?? []),
+            { $or: [{ classId: { $in: classIds } }, { _id: { $in: sectionIds } }] }
+        ];
+    }
+    return paginatedList(Section, filter, input);
+};
 
 export const createSection = async (req, input) => {
     const schoolId = assertTenant(req);
@@ -408,6 +426,7 @@ const classSubjectFilter = (req, input) => tenantFilter(req, {
 
 export const listClassSubjects = async (req, input) => {
     const filter = classSubjectFilter(req, input);
+    if (req.user.role === "teacher") filter.teacherId = req.user._id;
     if (input.search) {
         const subjectIds = await Subject.find({
             schoolId: assertTenant(req),
@@ -586,7 +605,8 @@ export const listTimetable = (req, input) =>
         tenantFilter(req, {
             academicSessionId: input.academicSessionId,
             ...(input.sectionId && { sectionId: input.sectionId }),
-            ...(input.dayOfWeek && { dayOfWeek: input.dayOfWeek })
+            ...(input.dayOfWeek && { dayOfWeek: input.dayOfWeek }),
+            ...(req.user.role === "teacher" && { teacherId: req.user._id })
         }),
         input,
         ["room"]

@@ -25,10 +25,6 @@ export const loginSchema = z.object({
     )
 }).strict();
 
-export const refreshSchema = z.object({
-    refreshToken: z.string().min(1).max(4096)
-}).strict();
-
 export const passwordRecoverySchema = z.object({
     email: emailSchema,
     schoolSlug: slugSchema.optional()

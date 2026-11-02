@@ -20,6 +20,7 @@ const { default: User } = await import("../src/models/user.model.js");
 const { default: RefreshSession } = await import("../src/models/refresh-session.model.js");
 const { default: AuditLog } = await import("../src/models/audit-log.model.js");
 const { default: mongoose } = await import("mongoose");
+const { createCsrfToken } = await import("../src/middleware/csrf.middleware.js");
 const { default: AcademicSession } = await import("../src/models/academic-session.model.js");
 const { default: AcademicClass } = await import("../src/models/academic-class.model.js");
 const { default: Section } = await import("../src/models/section.model.js");
@@ -113,6 +114,7 @@ const {
 } = await import("../src/services/academic.service.js");
 const { login, logout, refreshTokens, slugFromName } = await import("../src/services/auth.service.js");
 const { durationInSeconds, getConfig } = await import("../src/config/env.js");
+const csrfToken = createCsrfToken();
 
 test("health and root routes return stable success responses", async () => {
     const health = await request(app).get("/api/v1/health").expect(200);
@@ -131,6 +133,8 @@ test("API responses include security headers and enforce the CORS allowlist", as
         .expect(200);
     assert.equal(allowed.headers["x-content-type-options"], "nosniff");
     assert.equal(allowed.headers["access-control-allow-origin"], "http://localhost:3000");
+    assert.equal(allowed.headers["access-control-allow-credentials"], "true");
+    assert.match(allowed.headers["content-security-policy"], /object-src 'none'/);
 
     const denied = await request(app)
         .get("/api/v1/health")
@@ -145,6 +149,9 @@ test("API responses include security headers and enforce the CORS allowlist", as
 test("registration and school updates reject invalid and tenant-injected fields", async () => {
     const invalidRegistration = await request(app)
         .post("/api/v1/auth/register")
+        .set("Origin", "http://localhost:3000")
+        .set("Cookie", `schoolflow_csrf=${csrfToken}`)
+        .set("X-CSRF-Token", csrfToken)
         .send({ schoolName: "Example School", schoolId: "other-school" })
         .expect(400);
     assert.equal(invalidRegistration.body.success, false);
@@ -187,7 +194,7 @@ test("authentication errors and unknown routes use safe error envelopes", async 
     );
     await request(app)
         .get("/api/v1/auth/me")
-        .set("Authorization", `Bearer ${expiredToken}`)
+        .set("Cookie", `schoolflow_access=${expiredToken}`)
         .expect(401);
 });
 
@@ -271,7 +278,7 @@ test("authenticated school profile reads use only the authenticated tenant ID", 
     );
     const response = await request(app)
         .get("/api/v1/schools/me?schoolId=64a000000000000000000099")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}`)
         .expect(200);
 
     assert.equal(response.body.data.school.id, schoolId);
@@ -290,7 +297,7 @@ test("revoked persisted access sessions are rejected", async (t) => {
     );
     await request(app)
         .get("/api/v1/auth/me")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}`)
         .expect(401);
 });
 
@@ -320,7 +327,9 @@ test("teachers cannot update school profiles through the protected route", async
     );
     const response = await request(app)
         .patch("/api/v1/schools/me")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}; schoolflow_csrf=${csrfToken}`)
+        .set("X-CSRF-Token", csrfToken)
+        .set("Origin", "http://localhost:3000")
         .send({ name: "Unauthorized update" })
         .expect(403);
 
@@ -421,9 +430,8 @@ test("school login verifies credentials and binds sessions to the school tenant"
     );
 });
 
-test("logout revokes only the refresh session paired with the current access token", async (t) => {
+test("logout revokes the persisted refresh session and is safe when no cookie exists", async (t) => {
     const userId = "64a000000000000000000002";
-    const accessTokenId = "access-session-a";
     const refreshTokenId = "refresh-session-a";
     const refreshToken = jwt.sign(
         { tokenType: "refresh" },
@@ -434,20 +442,17 @@ test("logout revokes only the refresh session paired with the current access tok
 
     t.mock.method(RefreshSession, "updateOne", async (filter) => {
         revokeFilter = filter;
-        return { modifiedCount: filter.accessTokenId === accessTokenId ? 1 : 0 };
+        return { modifiedCount: 1 };
     });
 
-    await logout({ _id: userId }, accessTokenId, refreshToken);
-    assert.equal(revokeFilter.accessTokenId, accessTokenId);
+    await logout(refreshToken);
     assert.equal(revokeFilter.tokenId, refreshTokenId);
+    assert.equal(revokeFilter.userId, userId);
     assert.equal(
         revokeFilter.tokenHash,
         createHash("sha256").update(refreshToken).digest("hex")
     );
-    await assert.rejects(
-        logout({ _id: userId }, "different-access-session", refreshToken),
-        { statusCode: 401 }
-    );
+    await logout(undefined);
 });
 
 test("refresh rotates valid sessions and rejects replayed refresh tokens", async (t) => {
@@ -474,7 +479,9 @@ test("refresh rotates valid sessions and rejects replayed refresh tokens", async
     );
     const oldSession = {
         tokenId: refreshTokenId,
+        tokenHash: createHash("sha256").update(refreshToken).digest("hex"),
         userId,
+        expiresAt: new Date(Date.now() + 60_000),
         revokedAt: null,
         save: async () => { }
     };
@@ -482,19 +489,28 @@ test("refresh rotates valid sessions and rejects replayed refresh tokens", async
         withTransaction: async (callback) => callback(),
         endSession: async () => { }
     };
-    let activeRefreshSession = oldSession;
+    const sessions = new Map([[refreshTokenId, oldSession]]);
     let rotatedSession;
+    let replayRevocation;
 
     t.mock.method(mongoose, "startSession", async () => transaction);
     t.mock.method(RefreshSession, "findOne", (filter) => ({
-        session: async () => filter.tokenId === activeRefreshSession.tokenId
-            ? activeRefreshSession
-            : null
+        select() { return this; },
+        session: async () => sessions.get(filter.tokenId) ?? null
     }));
     t.mock.method(RefreshSession.prototype, "save", async function saveSession() {
         rotatedSession = this;
-        activeRefreshSession = this;
+        sessions.set(this.tokenId, this);
         return this;
+    });
+    t.mock.method(RefreshSession, "updateMany", async (filter) => {
+        replayRevocation = filter;
+        for (const persisted of sessions.values()) {
+            if (persisted.familyId === filter.familyId && !persisted.revokedAt) {
+                persisted.revokedAt = new Date();
+            }
+        }
+        return { modifiedCount: 1 };
     });
     t.mock.method(User, "findById", () => ({
         session: async () => user
@@ -508,9 +524,12 @@ test("refresh rotates valid sessions and rejects replayed refresh tokens", async
     assert.equal(rotatedSession.userId.toString(), userId);
     assert.equal(rotatedSession.schoolId.toString(), schoolId);
     assert.notEqual(rotatedSession.tokenId, refreshTokenId);
+    assert.equal(rotatedSession.familyId, refreshTokenId);
     assert.equal(result.user.schoolId, schoolId);
 
     await assert.rejects(refreshTokens(refreshToken), { statusCode: 401 });
+    assert.deepEqual(replayRevocation, { familyId: refreshTokenId, revokedAt: null });
+    assert.ok(rotatedSession.revokedAt instanceof Date);
 });
 
 test("provisioned platform admins can sign in without a school tenant", async (t) => {
@@ -883,12 +902,14 @@ test("academic endpoints reject unauthenticated access and tenant query injectio
     );
     await request(app)
         .get("/api/v1/academics/classes?schoolId=64a000000000000000000009")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}`)
         .expect(400);
 
     await request(app)
         .post("/api/v1/academics/classes")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}; schoolflow_csrf=${csrfToken}`)
+        .set("X-CSRF-Token", csrfToken)
+        .set("Origin", "http://localhost:3000")
         .send({ name: "Class 1", code: "C1" })
         .expect(403);
 });
@@ -933,7 +954,7 @@ test("validated Express query parameters are normalized before academic list han
     );
     const response = await request(app)
         .get("/api/v1/academics/classes?page=2&limit=5&isActive=false")
-        .set("Authorization", `Bearer ${accessToken}`)
+        .set("Cookie", `schoolflow_access=${accessToken}`)
         .expect(200);
 
     assert.equal(queryFilter.schoolId, schoolId);
@@ -2525,7 +2546,15 @@ test("dashboard and operational reports aggregate real records within the authen
 });
 
 test("reports endpoints require authentication", async () => {
-    await request(app)
-        .get("/api/v1/reports/dashboard")
-        .expect(401);
+    for (const path of [
+        "/api/v1/reports/dashboard",
+        "/api/v1/reports/students/records",
+        "/api/v1/reports/attendance/records",
+        "/api/v1/reports/finance/collections",
+        "/api/v1/reports/finance/dues",
+        "/api/v1/reports/academics/classes",
+        "/api/v1/reports/academics/results"
+    ]) {
+        await request(app).get(path).expect(401);
+    }
 });

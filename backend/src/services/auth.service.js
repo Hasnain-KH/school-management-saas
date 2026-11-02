@@ -35,7 +35,7 @@ export const toPublicSchool = (school) => ({
     settings: school.settings
 });
 
-const createTokenPair = async (user, schoolId, session) => {
+const createTokenPair = async (user, schoolId, session, familyId = randomUUID()) => {
     const {
         accessSecret,
         refreshSecret,
@@ -69,6 +69,7 @@ const createTokenPair = async (user, schoolId, session) => {
 
     const refreshSession = new RefreshSession({
         tokenId,
+        familyId,
         accessTokenId,
         tokenHash: hashToken(refreshToken),
         userId: user._id,
@@ -253,18 +254,29 @@ export const refreshTokens = async (refreshToken) => {
     const claims = verifyRefreshToken(refreshToken);
     const session = await mongoose.startSession();
     let result;
+    let replayDetected = false;
 
     try {
         await session.withTransaction(async () => {
             const currentSession = await RefreshSession.findOne({
                 tokenId: claims.jti,
-                userId: claims.sub,
-                tokenHash: hashToken(refreshToken),
-                revokedAt: null,
-                expiresAt: { $gt: new Date() }
-            }).session(session);
-            if (!currentSession) {
+                userId: claims.sub
+            }).select("+tokenHash").session(session);
+            if (!currentSession || currentSession.tokenHash !== hashToken(refreshToken)) {
                 throw new HttpError(401, "Refresh token is invalid or has been revoked");
+            }
+            if (currentSession.revokedAt || currentSession.expiresAt <= new Date()) {
+                // Legacy records have no family link, so their replay revokes every active user session.
+                const replayFilter = currentSession.familyId
+                    ? { familyId: currentSession.familyId, revokedAt: null }
+                    : { userId: currentSession.userId, revokedAt: null };
+                await RefreshSession.updateMany(
+                    replayFilter,
+                    { $set: { revokedAt: new Date() } },
+                    { session }
+                );
+                replayDetected = true;
+                return;
             }
 
             const user = await User.findById(claims.sub).session(session);
@@ -277,35 +289,46 @@ export const refreshTokens = async (refreshToken) => {
                 assertSchoolAccessible(school);
             }
 
+            const familyId = currentSession.familyId ?? currentSession.tokenId;
+            currentSession.familyId = familyId;
             currentSession.revokedAt = new Date();
             await currentSession.save({ session });
-            const tokens = await createTokenPair(user, user.schoolId, session);
+            const tokens = await createTokenPair(
+                user,
+                user.schoolId,
+                session,
+                familyId
+            );
             result = { user: toPublicUser(user), ...tokens };
         });
     } finally {
         await session.endSession();
     }
 
+    if (replayDetected) {
+        throw new HttpError(401, "Refresh token reuse detected; sign in again");
+    }
     return result;
 };
 
-export const logout = async (user, accessTokenId, refreshToken) => {
-    const claims = verifyRefreshToken(refreshToken);
-    if (claims.sub !== user._id.toString()) {
-        throw new HttpError(401, "Refresh token is invalid");
+export const logout = async (refreshToken) => {
+    let claims;
+    try {
+        claims = jwt.verify(refreshToken, getConfig().refreshSecret, {
+            algorithms: ["HS256"]
+        });
+    } catch (error) {
+        if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) return;
+        throw error;
     }
-
-    const result = await RefreshSession.updateOne(
+    if (claims.tokenType !== "refresh" || !claims.sub || !claims.jti) return;
+    await RefreshSession.updateOne(
         {
             tokenId: claims.jti,
-            accessTokenId,
-            userId: user._id,
+            userId: claims.sub,
             tokenHash: hashToken(refreshToken),
             revokedAt: null
         },
         { $set: { revokedAt: new Date() } }
     );
-    if (result.modifiedCount !== 1) {
-        throw new HttpError(401, "Refresh token is invalid or has been revoked");
-    }
 };

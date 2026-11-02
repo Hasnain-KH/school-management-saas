@@ -5,21 +5,20 @@ import School from "../models/school.model.js";
 import SubscriptionPlan from "../models/subscription-plan.model.js";
 import User from "../models/user.model.js";
 import { isEmailDeliveryConfigured } from "../services/email-delivery.provider.js";
+import { authCookieNames } from "../security/auth-cookies.js";
 import { HttpError } from "../utils/http-error.js";
 
 const unauthorized = () => new HttpError(401, "Authentication is required");
 
 export const requireAuth = async (req, res, next) => {
-    const header = req.get("authorization");
-    const match = header?.match(/^Bearer\s+(.+)$/i);
-
-    if (!match) {
+    const accessToken = req.cookies?.[authCookieNames.access];
+    if (!accessToken) {
         return next(unauthorized());
     }
 
     try {
         const { accessSecret } = getConfig();
-        const claims = jwt.verify(match[1], accessSecret, { algorithms: ["HS256"] });
+        const claims = jwt.verify(accessToken, accessSecret, { algorithms: ["HS256"] });
         if (claims.tokenType !== "access" || !claims.sub || !claims.jti) {
             return next(unauthorized());
         }

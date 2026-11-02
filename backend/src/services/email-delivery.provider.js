@@ -18,4 +18,12 @@ export const getEmailDeliveryProvider = () => {
     return provider;
 };
 
+export const getFeeReminderProvider = () => {
+    const configured = getEmailDeliveryProvider();
+    if (typeof configured.sendOverdueFeeReminder !== "function") {
+        throw new HttpError(503, "Overdue fee reminder delivery is unavailable until an email provider implements it");
+    }
+    return configured;
+};
+
 export const isEmailDeliveryConfigured = () => provider !== null;

@@ -17,7 +17,7 @@ const permissionsByRole = {
     ]),
     teacher: new Set([
         "school:read", "academic:read", "attendance:read", "attendance:manage", "exams:marks",
-        "notifications:read"
+        "exams:read", "notifications:read"
     ]),
     parent: new Set(["school:read", "student:read", "notifications:read"])
 };

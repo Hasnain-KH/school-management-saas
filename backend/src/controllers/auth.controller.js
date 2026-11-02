@@ -4,27 +4,40 @@ import {
     requestEmailVerification,
     requestPasswordRecovery
 } from "../services/account-security.service.js";
+import { authCookieNames, clearAuthCookies, setAuthCookies } from "../security/auth-cookies.js";
+import { issueCsrfToken } from "../middleware/csrf.middleware.js";
 import { sendSuccess } from "../utils/responses.js";
 
 export const register = async (req, res) => {
     const result = await registerSchool(req.body);
-    return sendSuccess(res, 201, result, "School registration completed");
+    const authenticated = Boolean(result.accessToken && result.refreshToken);
+    if (authenticated) setAuthCookies(res, result);
+    const { accessToken, refreshToken, ...data } = result;
+    return sendSuccess(res, 201, { ...data, authenticated }, "School registration completed");
 };
 
 export const signIn = async (req, res) => {
     const result = await login(req.body);
-    return sendSuccess(res, 200, result, "Signed in");
+    setAuthCookies(res, result);
+    return sendSuccess(res, 200, { user: result.user }, "Signed in");
 };
 
 export const refresh = async (req, res) => {
-    const result = await refreshTokens(req.body.refreshToken);
-    return sendSuccess(res, 200, result, "Tokens refreshed");
+    const result = await refreshTokens(req.cookies?.[authCookieNames.refresh]);
+    setAuthCookies(res, result);
+    return sendSuccess(res, 200, { user: result.user }, "Session refreshed");
 };
 
 export const signOut = async (req, res) => {
-    await logout(req.user, req.authSession.accessTokenId, req.body.refreshToken);
+    try {
+        await logout(req.cookies?.[authCookieNames.refresh]);
+    } finally {
+        clearAuthCookies(res);
+    }
     return sendSuccess(res, 200, null, "Signed out");
 };
+
+export const csrfToken = (req, res) => issueCsrfToken(req, res);
 
 export const currentUser = async (req, res) => {
     const user = {

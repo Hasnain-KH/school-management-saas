@@ -14,6 +14,7 @@ import {
     feeVoucherGenerateSchema,
     feeVoucherQuerySchema,
     overdueReportQuerySchema,
+    overdueReminderDispatchSchema,
     receiptParamsSchema,
     studentFeeAssignmentCreateSchema,
     voucherParamsSchema
@@ -36,5 +37,6 @@ router.get("/vouchers/:voucherId/payments", requirePermission("finance:read"), v
 router.get("/receipts/:receiptNumber", requirePermission("finance:read"), validate(receiptParamsSchema, "params"), controller.getReceipt);
 router.get("/reports/overdue", requirePermission("finance:read"), validate(overdueReportQuerySchema, "query"), controller.getOverdueReport);
 router.get("/reports/collections", requirePermission("finance:read"), validate(collectionReportQuerySchema, "query"), controller.getCollectionReport);
+router.post("/reminders/overdue/dispatch", requirePermission("finance:manage"), validate(overdueReminderDispatchSchema), controller.dispatchOverdueReminders);
 
 export default router;

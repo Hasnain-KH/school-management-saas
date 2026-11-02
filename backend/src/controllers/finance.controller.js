@@ -1,4 +1,5 @@
 import * as financeService from "../services/finance.service.js";
+import * as feeReminderService from "../services/fee-reminder.service.js";
 import { sendSuccess } from "../utils/responses.js";
 
 export const listCategories = async (req, res) =>
@@ -31,3 +32,5 @@ export const getOverdueReport = async (req, res) =>
     sendSuccess(res, 200, await financeService.getOverdueFeeReport(req, req.query));
 export const getCollectionReport = async (req, res) =>
     sendSuccess(res, 200, await financeService.getFeeCollectionReport(req, req.query));
+export const dispatchOverdueReminders = async (req, res) =>
+    sendSuccess(res, 200, await feeReminderService.dispatchOverdueFeeReminders(req, req.body), "Overdue reminder job completed");

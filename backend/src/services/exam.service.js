@@ -111,6 +111,28 @@ export const listExams = async (req, input) => {
         const escaped = input.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         filter.name = new RegExp(escaped, "i");
     }
+    if (req.user.role === "teacher") {
+        const assignedSubjects = await ClassSubject.find({
+            schoolId,
+            teacherId: req.user._id,
+            isActive: true,
+            ...(input.academicSessionId && { academicSessionId: input.academicSessionId }),
+            ...(input.classId && { classId: input.classId })
+        }).distinct("_id");
+        filter["subjects.classSubjectId"] = { $in: assignedSubjects };
+        const [items, total] = await Promise.all([
+            Exam.find(filter).sort({ createdAt: -1, _id: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+            Exam.countDocuments(filter)
+        ]);
+        const assignedIds = new Set(assignedSubjects.map(String));
+        return {
+            items: items.map((exam) => ({
+                ...exam,
+                subjects: exam.subjects.filter((subject) => assignedIds.has(String(subject.classSubjectId)))
+            })),
+            pagination: pageData(page, limit, total)
+        };
+    }
     const [items, total] = await Promise.all([
         Exam.find(filter).sort({ createdAt: -1, _id: 1 }).skip((page - 1) * limit).limit(limit).lean(),
         Exam.countDocuments(filter)
@@ -293,11 +315,56 @@ const getCalculatedResults = async (schoolId, exam) => {
     );
 };
 
+const teacherSubjectIds = async (req, exam) => {
+    if (req.user.role !== "teacher") return null;
+    return ClassSubject.find({
+        schoolId: assertTenant(req),
+        academicSessionId: exam.academicSessionId,
+        classId: exam.classId,
+        teacherId: req.user._id,
+        isActive: true
+    }).distinct("_id");
+};
+
+const teacherScopedResults = (results, exam, classSubjectIds) => {
+    if (!classSubjectIds) return results;
+    const assigned = new Set(classSubjectIds.map(String));
+    return results.flatMap((result) => {
+        const subjects = result.subjects.filter((subject) => assigned.has(subject.classSubjectId));
+        if (!subjects.length) return [];
+        const complete = subjects.every((item) => item.marksObtained !== null);
+        const totalObtained = subjects.reduce((sum, item) => sum + (item.marksObtained ?? 0), 0);
+        const totalMaximum = subjects.reduce((sum, item) => sum + item.maxMarks, 0);
+        const percentage = complete && totalMaximum > 0
+            ? Math.round((totalObtained / totalMaximum) * 10000) / 100
+            : null;
+        const band = percentage === null ? null : exam.gradingScale.find((item, index) =>
+            percentage >= item.minPercent
+            && (percentage < item.maxPercent || index === exam.gradingScale.length - 1)
+        );
+        return [{
+            ...result,
+            subjects,
+            totalObtained,
+            totalMaximum,
+            percentage,
+            grade: band?.grade ?? null,
+            remark: band?.remark,
+            complete,
+            passed: complete && subjects.every((item) => item.passed)
+        }];
+    });
+};
+
 export const getExamResults = async (req, examId, input) => {
     const schoolId = assertTenant(req);
     const exam = await findExam(schoolId, examId);
     if (exam.status !== "published") throw new HttpError(409, "Exam results have not been published");
-    const allResults = await getCalculatedResults(schoolId, exam);
+    const allResults = teacherScopedResults(
+        await getCalculatedResults(schoolId, exam),
+        exam,
+        await teacherSubjectIds(req, exam)
+    );
     const sortBy = input.sortBy ?? "name";
     const direction = input.sortOrder === "desc" ? -1 : 1;
     allResults.sort((a, b) => {
@@ -318,6 +385,9 @@ export const getExamResults = async (req, examId, input) => {
 
 export const getStudentReportCard = async (req, examId, studentId) => {
     const schoolId = assertTenant(req);
+    if (req.user.role === "teacher") {
+        throw new HttpError(403, "Full student report cards are available to school administrators and parents");
+    }
     const exam = await findExam(schoolId, examId);
     if (exam.status !== "published") throw new HttpError(409, "Exam results have not been published");
     const [student, hasMark] = await Promise.all([
@@ -341,7 +411,10 @@ export const getSubjectPerformance = async (req, examId) => {
         _id: { $in: exam.subjects.map((schedule) => schedule.subjectId) }
     }).select("_id name").lean();
     const names = new Map(subjects.map((subject) => [String(subject._id), subject.name]));
-    return exam.subjects.map((schedule) => {
+    const assigned = await teacherSubjectIds(req, exam);
+    return exam.subjects.filter((schedule) =>
+        !assigned || assigned.some((id) => String(id) === String(schedule.classSubjectId))
+    ).map((schedule) => {
         const records = marks.filter((mark) => String(mark.classSubjectId) === String(schedule.classSubjectId));
         const total = records.reduce((sum, record) => sum + record.marksObtained, 0);
         return {

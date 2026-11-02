@@ -3,6 +3,8 @@ import * as controller from "../controllers/platform.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { requirePermission } from "../middleware/authorization.middleware.js";
 import { validate } from "../validators/common.validator.js";
+import { auditQuerySchema } from "../validators/audit.validator.js";
+import { listPlatformEvents } from "../controllers/audit.controller.js";
 import {
     planCreateSchema,
     planParamsSchema,
@@ -18,6 +20,7 @@ const router = express.Router();
 router.use(requireAuth, requirePermission("platform:manage"));
 
 router.get("/plans", validate(planQuerySchema, "query"), controller.listPlans);
+router.get("/audit", validate(auditQuerySchema, "query"), listPlatformEvents);
 router.post("/plans", validate(planCreateSchema), controller.createPlan);
 router.patch("/plans/:planId", validate(planParamsSchema, "params"), validate(planUpdateSchema), controller.updatePlan);
 router.get("/schools", validate(platformSchoolQuerySchema, "query"), controller.listSchools);

@@ -107,3 +107,8 @@ export const collectionReportQuerySchema = z.object({
     message: "Report end date must be on or after start date",
     path: ["to"]
 });
+
+export const overdueReminderDispatchSchema = z.object({
+    asOf: dateSchema.optional(),
+    limit: z.number().int().min(1).max(500).default(250)
+}).strict();
