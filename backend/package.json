@@ -8,12 +8,13 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "dev": "node --watch scripts/start-dev.js",
-    "start": "node src/server.js",
-    "test": "node --test",
-    "test:redis:integration": "node --test test/redis.integration.test.js",
-    "db:indexes": "node scripts/create-indexes.js"
-  },
+  "dev": "node --watch scripts/start-dev.js",
+  "start": "node src/server.js",
+  "build": "node -e \"console.log('Backend: no build step required')\"",
+  "test": "node --test",
+  "test:redis:integration": "node --test test/redis.integration.test.js",
+  "db:indexes": "node scripts/create-indexes.js"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
