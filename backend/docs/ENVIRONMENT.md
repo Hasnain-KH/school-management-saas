@@ -16,6 +16,11 @@ This document lists the environment variables read by SchoolFlow source and its 
 | `TRUST_PROXY_HOPS` | No in local development | Defaults to `0`. | Configure to the trusted proxy hop count for the Vercel request path; deployment docs currently recommend `1`. | `0`; must be a non-negative integer. Controls Express `trust proxy`. | Backend: `backend/src/config/env.js`, `backend/src/server.js`, and `backend/src/serverless-handler.js`. | No. |
 | `ACCESS_TOKEN_TTL` | No | Optional override. | Optional override. | `15m`. Duration syntax is a positive integer followed by `s`, `m`, `h`, or `d`, maximum 365 days. | Backend: `backend/src/config/env.js`; access-token lifetime. | No. |
 | `REFRESH_TOKEN_TTL` | No | Optional override. | Optional override. | `7d`, maximum 365 days. | Backend: `backend/src/config/env.js`; refresh-token lifetime and persisted-session expiry. | No. |
+| `APP_BASE_URL` | No | Optional; defaults to `http://localhost:5173`. | Recommended: set to the deployed frontend origin so emailed links resolve. | `http://localhost:5173`. Trailing slash is removed. Used to build verification/reset/receipt links inside email templates. | Backend: `backend/src/services/email-templates.js`. | No; it is a public URL. |
+| `SEED_DEFAULT_PLANS` | No | Optional; set to `true` only if you want the default plans created automatically on startup. | Optional. When `true`, seeds the default `trial`, `basic`, `standard`, and `premium` plans if absent. | Unset. Seeding is skipped unless the value is exactly `true`. | Backend: `backend/src/services/plan-seed.service.js`; also runnable via `npm run db:seed-plans`. | No. |
+| `JOBS_RUNNER_SECRET` | Required only to enable the scheduled-job endpoint | Optional; without it `/api/v1/jobs/run` returns `503`. | Set when an external scheduler triggers jobs; the caller must send the same value in the `x-jobs-secret` header. | No default. The endpoint fails closed when unset. | Backend: `backend/src/controllers/job.controller.js`. | Yes: a shared secret between the backend and the scheduler. |
+| `ENABLE_DEV_SCHEDULER` | No | Optional; set to `true` to run an in-process scheduler during local development. | Do not set in production. | Unset. When exactly `true`, starts an in-process interval scheduler. | Backend: `backend/src/services/job-runner.service.js`. | No. |
+| `DEV_SCHEDULER_INTERVAL_MS` | No | Optional; only used when the dev scheduler is enabled. | Not applicable. | `86400000` (24 hours); values below `60000` fall back to the default. | Backend: `backend/src/services/job-runner.service.js`. | No. |
 
 `MONGO_URI` should point to a database dedicated to the environment. Transactional workflows need a MongoDB replica set. Production index creation is disabled by design; apply reviewed indexes with the documented migration process, not by turning on automatic index creation.
 
@@ -26,6 +31,23 @@ This document lists the environment variables read by SchoolFlow source and its 
 | `VITE_API_URL` | No | Defaults to `http://localhost:5000/api/v1`. Override only when the API is at another origin/path. | Leave unset for the configured same-origin deployment; default is `/api/v1`. For a split API deployment, set it to the API origin plus `/api/v1`. | Environment-specific fallback as described. Trailing slash is removed. | Frontend: `frontend/src/api/client.js`, substituted at Vite build time. | No. It is an API URL, not a secret. Do not place credentials or private keys in `VITE_*` variables; they are shipped to browsers. |
 
 There are no required frontend environment variables for the default local or same-origin Vercel setup. `frontend/.env.example` contains only the optional `VITE_API_URL` override and deliberately leaves it blank.
+
+## Optional external providers (email delivery and document storage)
+
+These variables are optional. When they are absent, SchoolFlow keeps its safe defaults: email-dependent workflows (password reset, verification, overdue reminders) return an explicit `503`, and document upload/download returns `503`. Setting the variables wires in the built-in adapters — a Resend-compatible HTTP email sender and an S3-compatible object store — without code changes. See [external services](./EXTERNAL-SERVICES.md).
+
+| Variable | Required? | Local development | Vercel production | Default / behavior | Owner and use | External credential? |
+|---|---|---|---|---|---|---|
+| `EMAIL_API_KEY` | No | Optional. | Optional. Required (with `EMAIL_FROM`) to enable email. | Unset; email delivery stays disabled. | Backend: `backend/src/services/email-delivery.provider.js`. | Yes: the provider API key. |
+| `EMAIL_FROM` | No | Optional. | Optional. Required (with `EMAIL_API_KEY`) to enable email. | Unset. A verified sender address, e.g. `SchoolFlow <no-reply@example.com>`. | Backend: `backend/src/services/email-delivery.provider.js`. | No; a verified sender identity. |
+| `EMAIL_API_URL` | No | Optional. | Optional. | `https://api.resend.com/emails`. Override for a Resend-compatible endpoint. | Backend: `backend/src/services/email-delivery.provider.js`. | No. |
+| `EMAIL_REPLY_TO` | No | Optional. | Optional. | Unset. | Backend: `backend/src/services/email-delivery.provider.js`. | No. |
+| `STORAGE_ENDPOINT` | No | Optional. | Optional. Required (with bucket and keys) to enable document storage. | Unset; document upload/download stays disabled (`503`). | Backend: `backend/src/services/document-storage.provider.js`. | No; an S3-compatible endpoint URL. |
+| `STORAGE_BUCKET` | No | Optional. | Optional. Required with `STORAGE_ENDPOINT` and keys. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
+| `STORAGE_ACCESS_KEY_ID` | No | Optional. | Optional. Required with the endpoint and bucket. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | Yes: object-storage access key. |
+| `STORAGE_SECRET_ACCESS_KEY` | No | Optional. | Optional. Required with the endpoint and bucket. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | Yes: object-storage secret key. |
+| `STORAGE_REGION` | No | Optional. | Optional. | `us-east-1`. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
+| `STORAGE_FORCE_PATH_STYLE` | No | Optional. | Optional. | `true` unless set to the literal `false`. Set `false` for virtual-hosted-style endpoints. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
 
 ## Test/tooling-only variables
 
@@ -46,4 +68,4 @@ The Redis smoke test is separate from the ordinary backend suite. Provision a de
 
 `vercel.json` does not declare environment variables. It configures the frontend build/output, serverless API function, SPA routing, and same-origin Content-Security-Policy headers. Configure secrets in Vercel's encrypted environment settings, not in `vercel.json`. The `VITE_API_URL` value is public build-time configuration; the backend URI, JWT secrets, and Redis URL are server-only. Production cookie authentication requires HTTPS; the default single-project Vercel deployment is same-origin. A split API deployment also requires adding its exact API origin to the Vercel `connect-src` policy, using a same-site frontend/API hostname arrangement, and listing exact frontend origins in `CORS_ORIGINS`.
 
-No email, payment, document-storage, or monitoring provider credentials are currently read from environment variables. Provider interfaces explicitly remain unavailable until real adapters are implemented and configured. Do not add credentials for these services to the example files until corresponding implementations exist.
+Email, document-storage, and scheduled-job settings are read from environment variables when provided; see the optional-provider table above and [external services](./EXTERNAL-SERVICES.md). Payment processing remains a provider interface without a configured adapter. Provider credentials must be stored only in the deployment platform's encrypted settings or an ignored local `.env`; never commit them or place them in `VITE_*` variables. Keep `backend/.env.example` free of real values.

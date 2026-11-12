@@ -78,3 +78,7 @@ export const studentGuardianQuerySchema = z.object({
     guardianId: objectIdSchema,
     isPrimary: z.boolean().default(false)
 }).strict();
+
+export const guardianAccountLinkSchema = z.object({
+    userId: objectIdSchema
+}).strict();

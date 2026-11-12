@@ -13,9 +13,10 @@ const assertTenant = (req) => {
     return req.user.schoolId;
 };
 
-export const dispatchOverdueFeeReminders = async (req, input = {}) => {
-    const schoolId = assertTenant(req);
-    const provider = getFeeReminderProvider();
+// Sends overdue fee reminders for a single school. Extracted so both the
+// authenticated API route and the platform scheduler use identical logic.
+export const dispatchSchoolOverdueFeeReminders = async (schoolId, input = {}, provider) => {
+    const reminderProvider = provider ?? getFeeReminderProvider();
     const asOf = input.asOf ? new Date(`${input.asOf}T23:59:59.999Z`) : new Date();
     const reminderDate = asOf.toISOString().slice(0, 10);
     const vouchers = await FeeVoucher.find({
@@ -81,7 +82,7 @@ export const dispatchOverdueFeeReminders = async (req, input = {}) => {
             }
 
             try {
-                await provider.sendOverdueFeeReminder({
+                await reminderProvider.sendOverdueFeeReminder({
                     to: guardian.email,
                     guardianName: guardian.name,
                     period: voucher.period,
@@ -107,4 +108,10 @@ export const dispatchOverdueFeeReminders = async (req, input = {}) => {
         }
     }
     return { ...result, failures };
+};
+
+export const dispatchOverdueFeeReminders = async (req, input = {}) => {
+    const schoolId = assertTenant(req);
+    const provider = getFeeReminderProvider();
+    return dispatchSchoolOverdueFeeReminders(schoolId, input, provider);
 };

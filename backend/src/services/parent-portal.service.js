@@ -16,10 +16,14 @@ const tenantId = (req) => {
     return req.user.schoolId;
 };
 
-const linkedStudentIds = async (req, schoolId) => {
+// Resolves the students explicitly linked to a parent user account within a school.
+// This is the single source of truth for parent-child authorization.
+export const getLinkedStudentIds = async (schoolId, parentUserId) => {
+    // Authoritative link: a guardian record explicitly linked to this parent user account.
+    // Email matching is never used for authorization because emails are not unique identities.
     const guardians = await Guardian.find({
         schoolId,
-        email: req.user.email.toLowerCase(),
+        userId: parentUserId,
         isActive: true
     }).select("_id").lean();
     if (!guardians.length) return [];
@@ -29,6 +33,8 @@ const linkedStudentIds = async (req, schoolId) => {
     }).select("studentId").lean();
     return [...new Set(links.map(({ studentId }) => String(studentId)))];
 };
+
+const linkedStudentIds = async (req, schoolId) => getLinkedStudentIds(schoolId, req.user._id);
 
 const assertLinkedStudent = async (req, studentId, schoolId) => {
     const linkedIds = await linkedStudentIds(req, schoolId);

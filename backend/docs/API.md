@@ -40,8 +40,14 @@ These routes require a provisioned `platform_super_admin` and `platform:manage`;
 | GET | `/platform/schools?status=...&search=...` | Paginated platform-wide school directory |
 | PATCH | `/platform/schools/:schoolId/status` | Set school status to `trial`, `active`, `suspended`, or `expired`; active/trial status requires a valid subscription and eligible assigned plan |
 | PATCH | `/platform/schools/:schoolId/subscription` | Assign an active plan and update subscription lifecycle dates/status; trial uses the configured default-trial plan |
+| POST | `/platform/schools/:schoolId/payments` | Record an offline (manual) payment; optionally activate/extend the school's subscription from it |
+| POST | `/platform/schools/:schoolId/checkout` | Create a gateway checkout session for a paid plan (returns `503` until a payment gateway adapter is configured) |
+| GET | `/platform/payments?schoolId=&status=` | Paginated platform-wide payment records |
+| GET | `/platform/reports/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD` | Revenue report: paid totals by currency, by month, and by plan, plus pending (outstanding) amounts |
 
-Plan changes, subscription assignment, school status changes, and their audit records are transactional. Deactivating a plan prevents new assignments but does not silently remove current subscribers' entitlements. Feature flags are checked on school API routes. Student, active staff, and branch caps are checked against tenant records during transactional creation; lowering a plan cap does not delete existing records.
+Plan changes, subscription assignment, school status changes, payment recording, and their audit records are transactional. Deactivating a plan prevents new assignments but does not silently remove current subscribers' entitlements. Feature flags are checked on school API routes. Student, active staff, and branch caps are checked against tenant records during transactional creation; lowering a plan cap does not delete existing records.
+
+Payments are recorded per school with amount, currency, status (`pending`, `paid`, `failed`, `refunded`), and method (`manual` or `gateway`). Recording a manual payment marks it paid and audits it; passing `applySubscription: true` also activates or extends the subscription. Gateway payments are created as `pending` and become `paid` only after a verified webhook (see `POST /payments/webhook`). All revenue figures are aggregated from these records; none are hardcoded.
 
 ## School profile
 
@@ -158,7 +164,7 @@ Grading bands must be unique, contiguous, non-overlapping, and cover 0–100%. E
 
 ## School operations and announcements
 
-These APIs use the authenticated school tenant and require the corresponding active plan feature (`calendar`, `inventory`, `library`, or `notifications`). School admins and principals manage school operations; teachers, parents, principals, and admins only see calendar events/announcements whose audience includes their role. Announcement delivery is an in-app API feed only; it does not send email, SMS, or push notifications.
+These APIs use the authenticated school tenant and require the corresponding active plan feature (`calendar`, `inventory`, `library`, or `notifications`). School admins and principals manage school operations; teachers, parents, principals, and admins only see calendar events/announcements whose audience includes their role. Announcement delivery is an in-app API feed (announcements and published results also create per-user notifications; see below); it does not send email, SMS, or push notifications.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -186,6 +192,37 @@ Inventory changes are represented as immutable received/issued transactions. Loa
 
 Depreciation uses integer minor currency units, cost less salvage value, and useful life in months. Monthly postings must be sequential beginning in the acquisition month; duplicate, future, and out-of-order periods are rejected. Fixed assets require the `inventory` feature and `operations:read` or `operations:manage`.
 
+## Notifications, documents, and scheduled jobs
+
+Per-user notifications require `notifications:read` and the `notifications` plan feature. They are scoped to the authenticated user and school; the platform super-admin role does not use them.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/notifications?page=1&limit=25&unreadOnly=false` | Paginated notifications addressed to the caller |
+| GET | `/notifications/unread-count` | Unread count for the top-bar badge |
+| POST | `/notifications/:id/read` | Mark one of the caller's notifications read |
+| POST | `/notifications/read-all` | Mark all of the caller's notifications read |
+
+Notifications are created server-side on relevant events (announcements, published exam results, subscription changes). Creation is idempotent when a dedupe key is supplied, so repeated events do not duplicate entries.
+
+Documents require `documents:read` (all school roles) or `documents:manage` (school admin/principal) and the `documents` plan feature. Uploads are base64 JSON (no multipart), capped at 5 MB, restricted to PDF/image/Word/Excel types; bytes are stored in S3-compatible object storage and downloads use short-lived presigned URLs. Parents only see documents tied to their linked children.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/documents?page=1&limit=25&category=&studentId=` | Paginated document library (parent-scoped) |
+| POST | `/documents` | Upload a document (`title`, `category`, `fileName`, `contentType`, `dataBase64`, optional `studentId`/`subjectUserId`) |
+| GET | `/documents/:id/download` | Return a presigned download URL for an accessible document |
+| DELETE | `/documents/:id` | Soft-delete metadata and remove the stored object (manage roles only) |
+
+Scheduled jobs run idempotently (one run per job per UTC day, with a lease) and are triggered by an external scheduler:
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| POST | `/jobs/run` | `x-jobs-secret` header | Run `fee_reminders` and/or `subscription_expiry` (optional `job`, `force`, `asOf` in the JSON body) |
+| GET | `/jobs` | Platform super admin | List the available jobs |
+
+The jobs endpoint returns `503` when `JOBS_RUNNER_SECRET` is unset and `401` for an invalid secret. `fee_reminders` skips (no-op) when email is not configured. See [external services](../../docs/EXTERNAL-SERVICES.md).
+
 ## Reports and dashboard
 
 These read-only reports require `reports:read` (school admins and principals) and the `reports` plan feature, and aggregate records using the authenticated `schoolId`; no dashboard values are hardcoded.
@@ -211,7 +248,7 @@ All report data endpoints require `reports:read` and the `reports` plan feature.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| GET | `/portal/parent/students` | Parent account | List only students linked to a same-school Guardian with the parent's account email |
+| GET | `/portal/parent/students` | Parent account | List only students linked to a same-school Guardian whose account is linked to the parent's user id |
 | GET | `/portal/parent/students/:studentId/attendance?from=YYYY-MM-DD&to=YYYY-MM-DD` | Linked parent only | Up to 100 same-tenant attendance records |
 | GET | `/portal/parent/students/:studentId/fees` | Linked parent only | Read-only fee voucher balances and immutable payment history for the linked student |
 | GET | `/portal/parent/students/:studentId/results` | Linked parent only | Marks for published exams for the linked student's class |
@@ -219,16 +256,16 @@ All report data endpoints require `reports:read` and the `reports` plan feature.
 | GET | `/audit` | School admin with `audit:read` | Paginated school audit events, optionally filtered by `action`, `resourceType`, and date range |
 | GET | `/platform/audit` | Platform super admin | Paginated platform audit events |
 
-Parent access is denied unless the student-guardian relationship exists in the authenticated school. Every child-resource lookup additionally includes the authenticated school ID. Calendar audience filters are applied by the server, not trusted to caller-supplied role values.
+Parent access is denied unless the student-guardian relationship exists in the authenticated school and the guardian record is linked to the parent's user account (`PUT /students/guardians/:guardianId/account` links it; `DELETE` unlinks it). Every child-resource lookup additionally includes the authenticated school ID. Calendar audience filters are applied by the server, not trusted to caller-supplied role values.
 
 ## Provider status and downloads
 
-Password recovery, email verification, and overdue reminders use provider interfaces but delivery is unavailable until an actual email adapter is configured. `payment-gateway.provider.js` and `document-storage.provider.js` define adapter contracts only; online checkout, webhook processing, and file-upload routes are not enabled. The frontend exports returned report data to CSV and Excel. PDF is a printable browser report; the user saves it using the browser's print-to-PDF option. No third-party delivery, payment, or storage is simulated.
+Email delivery (password reset, email verification, overdue reminders, welcome/notification mail) is implemented behind a Resend-compatible HTTP adapter and is enabled by setting `EMAIL_API_KEY` and `EMAIL_FROM`; until then delivery endpoints return `503`. Document upload/download is implemented behind an S3-compatible adapter and is enabled by setting `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, and credentials; until then document routes return `503`. `payment-gateway.provider.js` remains an adapter contract only — online checkout and webhook processing are not enabled. The frontend exports returned report data to CSV and Excel. PDF is a printable browser report; the user saves it using the browser's print-to-PDF option. No third-party delivery, payment, or storage is simulated. See [external services](../../docs/EXTERNAL-SERVICES.md).
 
 The React frontend lives in `frontend/`, defaults to `http://localhost:5000/api/v1`, and uses `VITE_API_URL` for another API origin. The interface provides role-specific navigation; server-side permissions remain authoritative.
 
 ## Limits and status codes
 
-The API has a global rate limit of 300 requests per IP per 15 minutes; authentication routes allow 10 per IP per 15 minutes. Common statuses: `200` success, `201` created, `202` accepted for delivery, `400` invalid input, `401` missing/invalid credentials, `403` forbidden or inactive tenant/feature, `404` unknown resource/route, `409` business conflict or duplicate record, `413` body too large, `429` rate limit exceeded, and `503` unavailable service (including unconfigured email delivery or trial plan).
+The API has a global rate limit of 300 requests per IP per 15 minutes; authentication routes allow 10 per IP per 15 minutes. Common statuses: `200` success, `201` created, `202` accepted for delivery, `400` invalid input, `401` missing/invalid credentials, `403` forbidden or inactive tenant/feature, `404` unknown resource/route, `409` business conflict or duplicate record, `413` body too large, `429` rate limit exceeded, and `503` unavailable service (including unconfigured email delivery, document storage, jobs endpoint, or trial plan).
 
-Email/SMS/push delivery (including actual password-recovery and verification email delivery), online payment processing, automatic overdue reminders, server-generated PDF reports, fixed-asset assignment/depreciation, and document uploads are not implemented. The frontend exports the displayed report records to CSV and Excel and uses browser print-to-PDF; it does not generate a server-side PDF. Email action-token workflows are implemented but delivery-request endpoints return `503` until an actual provider is configured; token-confirmation endpoints are available for issued tokens.
+Online payment processing is not implemented; `payment-gateway.provider.js` is an adapter contract without an adapter, so there is no online checkout or payment webhook. Server-generated PDF reports are not implemented: the frontend exports displayed report records to CSV and Excel and uses browser print-to-PDF. Email and document-storage adapters are implemented but delivery endpoints return `503` until the corresponding environment variables are configured; token-confirmation endpoints are available for issued tokens.

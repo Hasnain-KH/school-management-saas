@@ -1,16 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import mongoose from "mongoose";
+import AuditLog from "../src/models/audit-log.model.js";
 import FixedAsset from "../src/models/fixed-asset.model.js";
 import FeeVoucher from "../src/models/fee-voucher.model.js";
 import Guardian from "../src/models/guardian.model.js";
 import Student from "../src/models/student.model.js";
 import StudentGuardian from "../src/models/student-guardian.model.js";
+import User from "../src/models/user.model.js";
 import { hasPermission } from "../src/middleware/authorization.middleware.js";
 import {
     getParentStudentFees,
     listParentStudents
 } from "../src/services/parent-portal.service.js";
+import {
+    linkGuardianAccount,
+    unlinkGuardianAccount
+} from "../src/services/student.service.js";
+
+const withMockedTransaction = (t) => {
+    const transaction = {
+        async withTransaction(callback) { return callback(); },
+        async endSession() {}
+    };
+    t.mock.method(mongoose, "startSession", async () => transaction);
+    t.mock.method(AuditLog.prototype, "save", async function saveAudit() { return this; });
+};
 
 test("parent self-service is school-scoped and only returns explicitly linked students (mocked models)", async () => {
     const schoolId = new mongoose.Types.ObjectId();
@@ -50,15 +65,18 @@ test("parent self-service is school-scoped and only returns explicitly linked st
     };
 
     try {
+        const parentUserId = new mongoose.Types.ObjectId();
         const req = {
-            user: { _id: new mongoose.Types.ObjectId(), role: "parent", schoolId, email: "PARENT@example.test" },
+            user: { _id: parentUserId, role: "parent", schoolId, email: "PARENT@example.test" },
             school: { _id: schoolId }
         };
         const students = await listParentStudents(req);
         assert.equal(students.length, 1);
         assert.equal(students[0].id, String(studentId));
         assert.equal(guardianFilter.schoolId, schoolId);
-        assert.equal(guardianFilter.email, "parent@example.test");
+        // Authorization must key off the explicit user link, never a mutable email value.
+        assert.equal(guardianFilter.userId, parentUserId);
+        assert.equal(guardianFilter.email, undefined);
         assert.equal(linkFilter.schoolId, schoolId);
         assert.equal(studentFilter.schoolId, schoolId);
         assert.deepEqual(studentFilter._id.$in, [String(studentId)]);
@@ -112,6 +130,82 @@ test("tenant mismatch blocks parent portal access before database lookups", asyn
     } finally {
         Guardian.find = originalGuardianFind;
     }
+});
+
+test("linking a guardian account binds the tenant, the parent role, and audits the change", async (t) => {
+    withMockedTransaction(t);
+    const schoolId = new mongoose.Types.ObjectId();
+    const guardianId = new mongoose.Types.ObjectId();
+    const parentUserId = new mongoose.Types.ObjectId();
+    const guardian = { _id: guardianId, schoolId, userId: null, async save() { return this; } };
+    let userFilter;
+
+    t.mock.method(Guardian, "findOne", () => ({ session: async () => guardian }));
+    t.mock.method(User, "findOne", (filter) => {
+        userFilter = filter;
+        return { session: async () => ({ _id: parentUserId, role: "parent", status: "active" }) };
+    });
+
+    const result = await linkGuardianAccount(
+        { user: { _id: new mongoose.Types.ObjectId(), schoolId }, school: { _id: schoolId } },
+        guardianId,
+        parentUserId
+    );
+
+    assert.equal(result.userId, String(parentUserId));
+    assert.equal(String(guardian.userId), String(parentUserId));
+    assert.equal(userFilter.schoolId, schoolId);
+    assert.equal(userFilter.role, "parent");
+    assert.equal(userFilter.status, "active");
+});
+
+test("linking a guardian account rejects a non-parent or cross-tenant user", async (t) => {
+    withMockedTransaction(t);
+    const schoolId = new mongoose.Types.ObjectId();
+    const guardianId = new mongoose.Types.ObjectId();
+    const guardian = { _id: guardianId, schoolId, userId: null, async save() { return this; } };
+
+    t.mock.method(Guardian, "findOne", () => ({ session: async () => guardian }));
+    t.mock.method(User, "findOne", () => ({ session: async () => null }));
+
+    await assert.rejects(
+        linkGuardianAccount(
+            { user: { _id: new mongoose.Types.ObjectId(), schoolId }, school: { _id: schoolId } },
+            guardianId,
+            new mongoose.Types.ObjectId()
+        ),
+        { statusCode: 404 }
+    );
+    assert.equal(guardian.userId, null);
+});
+
+test("unlinking a guardian account clears the parent link and requires an existing link", async (t) => {
+    withMockedTransaction(t);
+    const schoolId = new mongoose.Types.ObjectId();
+    const guardianId = new mongoose.Types.ObjectId();
+    const guardian = {
+        _id: guardianId,
+        schoolId,
+        userId: new mongoose.Types.ObjectId(),
+        async save() { return this; }
+    };
+    t.mock.method(Guardian, "findOne", () => ({ session: async () => guardian }));
+
+    const result = await unlinkGuardianAccount(
+        { user: { _id: new mongoose.Types.ObjectId(), schoolId }, school: { _id: schoolId } },
+        guardianId
+    );
+    assert.equal(result.userId, null);
+    assert.equal(guardian.userId, null);
+
+    guardian.userId = null;
+    await assert.rejects(
+        unlinkGuardianAccount(
+            { user: { _id: new mongoose.Types.ObjectId(), schoolId }, school: { _id: schoolId } },
+            guardianId
+        ),
+        { statusCode: 409 }
+    );
 });
 
 test("fixed-asset values reject salvage values at or above acquisition cost", async () => {

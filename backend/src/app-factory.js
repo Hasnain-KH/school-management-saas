@@ -9,8 +9,12 @@ import academicRoutes from "./routes/academic.routes.js";
 import financeRoutes from "./routes/finance.routes.js";
 import examRoutes from "./routes/exam.routes.js";
 import operationsRoutes from "./routes/operations.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import jobRoutes from "./routes/job.routes.js";
+import documentRoutes from "./routes/document.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import platformRoutes from "./routes/platform.routes.js";
+import paymentRoutes from "./routes/payment.routes.js";
 import fixedAssetRoutes from "./routes/fixed-asset.routes.js";
 import parentPortalRoutes from "./routes/parent-portal.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
@@ -56,14 +60,21 @@ export const createApp = ({ rateLimitOptions } = {}) => {
         },
         credentials: true
     }));
-    app.use(express.json({ limit: "100kb" }));
     app.use(cookieParser());
     app.use(csrfProtection);
+    // Document uploads carry base64 payloads, so they need a larger JSON body
+    // limit. Mounting this before the global parser lets it win for that path.
+    app.use("/api/v1/documents", express.json({ limit: "8mb" }));
+    // Gateway webhooks must be verified against the exact bytes the provider
+    // signed, so capture the raw body for that path before the JSON parser.
+    app.use("/api/v1/payments/webhook", express.raw({ type: "*/*", limit: "200kb" }));
+    app.use(express.json({ limit: "100kb" }));
 
     app.use("/api/v1", healthRoutes);
     app.use("/api/v1", apiLimiter);
     app.use("/api/v1/auth", authRoutes);
     app.use("/api/v1/platform", platformRoutes);
+    app.use("/api/v1/payments", paymentRoutes);
     app.use("/api/v1/portal/parent", parentPortalRoutes);
     app.use("/api/v1/portal", portalRoutes);
     app.use("/api/v1/portal/teacher", teacherPortalRoutes);
@@ -74,6 +85,9 @@ export const createApp = ({ rateLimitOptions } = {}) => {
     app.use("/api/v1/exams", examRoutes);
     app.use("/api/v1/operations", operationsRoutes);
     app.use("/api/v1/operations/assets", fixedAssetRoutes);
+    app.use("/api/v1/notifications", notificationRoutes);
+    app.use("/api/v1/documents", documentRoutes);
+    app.use("/api/v1/jobs", jobRoutes);
     app.use("/api/v1/reports", reportsRoutes);
     app.use("/api/v1/users", userRoutes);
     app.use("/api/v1/students", studentRoutes);

@@ -26,18 +26,24 @@ The frontend defaults to `http://localhost:5000/api/v1`; set `VITE_API_URL` at b
 
 From the repository root, run `npm test` for the backend suite, `npm run build` for the frontend production build, and `npm audit` to audit workspace dependencies. Run browser tests from `frontend/` with `npm run test:e2e` after installing the Playwright Chromium browser (`npx playwright install chromium`).
 
-## Vercel preparation
+## Vercel deployment
 
-The Vercel configuration deploys frontend and API together from the repository root; see [backend deployment notes](./backend/README.md#vercel-deployment-not-yet-production-verified). Configure backend environment variables, including a Redis-compatible shared rate-limit URL, in Vercel. This repository has not been deployed or verified in Vercel. An approved scheduled-job provider is also required for automated reminders.
+The Vercel configuration deploys the frontend and API together as a single project from the repository root (`outputDirectory: frontend/dist`, an SPA fallback rewrite, and `api/[...path].mjs` as the Express function). Configure backend environment variables — including a Redis-compatible shared rate-limit URL — in Vercel. See the [Vercel deployment guide](./docs/DEPLOYMENT-VERCEL.md). No live Vercel deployment has been verified from this repository.
 
 ## Workspaces and documentation
 
 - `frontend/` — React application, role-specific dashboards, API client, report downloads, and responsive design system.
 - `backend/` — tenant-scoped API and MongoDB models.
 - [Backend setup and verification](./backend/README.md)
+- [Vercel deployment guide](./docs/DEPLOYMENT-VERCEL.md)
+- [External services setup](./docs/EXTERNAL-SERVICES.md) — email, document storage, scheduled jobs, Redis, Atlas, payments
 - [Environment-variable reference](./backend/docs/ENVIRONMENT.md)
 - [API reference](./backend/docs/API.md)
 - [Data model and authorization](./backend/docs/DATA-MODELS.md)
 - [Project completion record](./PROJECT_COMPLETION.md)
+- [Phase completion report](./docs/PHASE-COMPLETION.md)
+- [Testing report](./docs/TESTING.md)
+- [Remaining manual tasks](./docs/REMAINING-TASKS.md)
+- [Production verdict](./docs/PRODUCTION-VERDICT.md)
 
-The application is not represented as production-ready. See the completion record for test evidence and external-service/database limitations.
+Email delivery, document storage, and scheduled reminders are optional and behind provider abstractions that return an explicit `503` until configured; see the [external services guide](./docs/EXTERNAL-SERVICES.md). MongoDB Atlas (replica set) and, in production, a Redis-compatible rate-limit store are required. See the completion record for test evidence and remaining external-service limitations.

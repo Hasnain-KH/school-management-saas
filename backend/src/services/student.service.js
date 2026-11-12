@@ -8,6 +8,7 @@ import Student from "../models/student.model.js";
 import StudentAcademicHistory from "../models/student-academic-history.model.js";
 import StudentLeavingCertificate from "../models/student-leaving-certificate.model.js";
 import StudentGuardian from "../models/student-guardian.model.js";
+import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { tenantFilter } from "../middleware/authorization.middleware.js";
 import { withTransaction } from "../utils/transaction.js";
@@ -501,5 +502,46 @@ export const unlinkGuardian = async (req, studentId, guardianId) => {
         await createAudit(req, session, "student.guardian.unlinked", "student", studentId, {
             guardianId: guardianId.toString()
         });
+    });
+};
+
+// Links a guardian record to the parent user account that owns it. This is the
+// authoritative relationship the parent portal authorizes against; it must only
+// ever point at an active parent user inside the same school.
+export const linkGuardianAccount = async (req, guardianId, parentUserId) => {
+    const schoolId = assertTenant(req);
+    return withTransaction(async (session) => {
+        const [guardian, parentUser] = await Promise.all([
+            Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session),
+            User.findOne({ _id: parentUserId, schoolId, role: "parent", status: "active" }).session(session)
+        ]);
+        if (!guardian) throw new HttpError(404, "Guardian was not found in this school");
+        if (!parentUser) {
+            throw new HttpError(404, "An active parent account was not found in this school");
+        }
+        guardian.userId = parentUser._id;
+        await guardian.save({ session });
+        await createAudit(req, session, "guardian.account.linked", "guardian", guardian._id, {
+            parentUserId: parentUser._id.toString()
+        });
+        return { id: guardian._id.toString(), userId: parentUser._id.toString() };
+    });
+};
+
+export const unlinkGuardianAccount = async (req, guardianId) => {
+    const schoolId = assertTenant(req);
+    return withTransaction(async (session) => {
+        const guardian = await Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session);
+        if (!guardian) throw new HttpError(404, "Guardian was not found in this school");
+        if (!guardian.userId) {
+            throw new HttpError(409, "This guardian is not linked to a parent account");
+        }
+        const previousUserId = guardian.userId;
+        guardian.userId = null;
+        await guardian.save({ session });
+        await createAudit(req, session, "guardian.account.unlinked", "guardian", guardian._id, {
+            parentUserId: previousUserId.toString()
+        });
+        return { id: guardian._id.toString(), userId: null };
     });
 };

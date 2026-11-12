@@ -13,7 +13,10 @@
   "build": "node -e \"console.log('Backend: no build step required')\"",
   "test": "node --test",
   "test:redis:integration": "node --test test/redis.integration.test.js",
-  "db:indexes": "node scripts/create-indexes.js"
+  "test:mongo:integration": "node --test test/mongo.integration.test.js",
+  "db:indexes": "node scripts/create-indexes.js",
+  "db:seed-plans": "node scripts/seed-plans.js",
+  "db:create-admin": "node scripts/create-platform-admin.js"
 },
   "keywords": [],
   "author": "",

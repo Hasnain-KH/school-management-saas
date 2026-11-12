@@ -101,7 +101,14 @@ export const updateUser = async (req, userId, input) => {
             && ["school_admin", "principal", "teacher"].includes(user.role)) {
             await assertPlanCapacity(req, session, "staff");
         }
-        for (const [field, value] of Object.entries(input)) user.set(field, value);
+        // Explicit allow-list. Never assign arbitrary request fields: role, schoolId,
+        // passwordHash, and email are deliberately not updatable through this path.
+        const updatableFields = ["name", "phone", "jobTitle", "status"];
+        const changes = {};
+        for (const field of updatableFields) {
+            if (Object.hasOwn(input, field)) changes[field] = input[field];
+        }
+        user.set(changes);
         await user.save({ session });
 
         const audit = new AuditLog({
@@ -110,7 +117,7 @@ export const updateUser = async (req, userId, input) => {
             action: "user.updated",
             resourceType: "user",
             resourceId: user._id,
-            metadata: { fields: Object.keys(input) }
+            metadata: { fields: Object.keys(changes) }
         });
         await audit.save({ session });
         return user;

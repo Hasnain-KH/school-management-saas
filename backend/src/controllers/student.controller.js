@@ -61,3 +61,17 @@ export const unlinkGuardian = async (req, res) => {
     await studentService.unlinkGuardian(req, req.params.studentId, req.params.guardianId);
     return sendSuccess(res, 200, null, "Guardian unlinked");
 };
+export const linkGuardianAccount = async (req, res) =>
+    sendSuccess(
+        res,
+        200,
+        await studentService.linkGuardianAccount(req, req.params.guardianId, req.body.userId),
+        "Guardian account linked"
+    );
+export const unlinkGuardianAccount = async (req, res) =>
+    sendSuccess(
+        res,
+        200,
+        await studentService.unlinkGuardianAccount(req, req.params.guardianId),
+        "Guardian account unlinked"
+    );

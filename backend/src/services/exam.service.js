@@ -4,8 +4,11 @@ import AuditLog from "../models/audit-log.model.js";
 import ClassSubject from "../models/class-subject.model.js";
 import Exam from "../models/exam.model.js";
 import ExamMark from "../models/exam-mark.model.js";
+import Guardian from "../models/guardian.model.js";
 import Student from "../models/student.model.js";
+import StudentGuardian from "../models/student-guardian.model.js";
 import Subject from "../models/subject.model.js";
+import { createNotificationsForUserIds } from "./notification.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
 
@@ -217,7 +220,7 @@ export const enterExamMarks = async (req, examId, input) => {
 
 export const publishExamResults = async (req, examId) => {
     const schoolId = assertTenant(req);
-    return withTransaction(async (session) => {
+    const { published, studentIds } = await withTransaction(async (session) => {
         const exam = await findExam(schoolId, examId, session);
         if (exam.status === "published") throw new HttpError(409, "Exam results are already published");
         const students = await Student.find({
@@ -246,8 +249,36 @@ export const publishExamResults = async (req, examId) => {
             students: students.length,
             subjects: exam.subjects.length
         });
-        return updated.toObject();
+        return { published: updated.toObject(), studentIds: students.map((student) => student._id) };
     });
+
+    // Best-effort parent notifications, outside the transaction so a notification
+    // failure can never roll back a published result set.
+    try {
+        const links = await StudentGuardian.find({ schoolId, studentId: { $in: studentIds } })
+            .select("guardianId").lean();
+        if (links.length) {
+            const guardians = await Guardian.find({
+                schoolId,
+                _id: { $in: links.map(({ guardianId }) => guardianId) },
+                isActive: true,
+                userId: { $ne: null }
+            }).select("userId").lean();
+            const parentUserIds = [...new Set(guardians.map(({ userId }) => String(userId)))];
+            await createNotificationsForUserIds({
+                schoolId,
+                userIds: parentUserIds,
+                type: "result",
+                title: "Exam results published",
+                body: `Results for ${published.name} are now available in the parent portal.`,
+                data: { examId: String(published._id) },
+                dedupeKey: `exam-published:${published._id}`
+            });
+        }
+    } catch (error) {
+        console.error("Exam result notification fan-out failed", error?.name ?? "Error");
+    }
+    return published;
 };
 
 const calculateStudentResult = (student, exam, marksBySubject, subjectNames) => {

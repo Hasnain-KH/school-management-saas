@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import mongoose from "mongoose";
 import AuditLog from "../src/models/audit-log.model.js";
+import Guardian from "../src/models/guardian.model.js";
 import Student from "../src/models/student.model.js";
+import StudentGuardian from "../src/models/student-guardian.model.js";
+import User from "../src/models/user.model.js";
 import { validateMongoTestUri } from "../src/testing/mongo-test-safety.js";
 
 const uri = process.env.MONGO_TEST_URI;
@@ -200,3 +203,103 @@ test("isolated MongoDB persists tenant data, enforces indexes, supports transact
         }
     }
 });
+
+test("real MongoDB enforces cross-tenant isolation for updates, deletes, and parent-child access", {
+    skip: uri ? false : "Set MONGO_TEST_URI to an isolated test-only MongoDB replica-set URI"
+}, async () => {
+    assert.notEqual(process.env.NODE_ENV, "production", "MongoDB integration tests cannot run with NODE_ENV=production");
+    const testUri = validateMongoTestUri(uri);
+    const suffix = randomUUID().replaceAll("-", "");
+    const collections = {
+        student: `students_iso_${suffix}`,
+        guardian: `guardians_iso_${suffix}`,
+        link: `student_guardians_iso_${suffix}`,
+        user: `users_iso_${suffix}`
+    };
+    const collectionNames = Object.values(collections);
+    let connection;
+
+    try {
+        connection = await mongoose.createConnection(testUri, {
+            autoIndex: false,
+            serverSelectionTimeoutMS: 8000
+        }).asPromise();
+
+        const StudentModel = connection.model(`IsoStudent_${suffix}`, Student.schema, collections.student);
+        const GuardianModel = connection.model(`IsoGuardian_${suffix}`, Guardian.schema, collections.guardian);
+        const LinkModel = connection.model(`IsoLink_${suffix}`, StudentGuardian.schema, collections.link);
+        const UserModel = connection.model(`IsoUser_${suffix}`, User.schema, collections.user);
+        await Promise.all([
+            StudentModel.createIndexes(),
+            GuardianModel.createIndexes(),
+            LinkModel.createIndexes(),
+            UserModel.createIndexes()
+        ]);
+
+        const schoolA = new mongoose.Types.ObjectId();
+        const schoolB = new mongoose.Types.ObjectId();
+        const parentUserA = await UserModel.create({
+            schoolId: schoolA,
+            name: "Parent A",
+            email: `parent-a-${suffix}@example.test`,
+            role: "parent",
+            passwordHash: "integration-hash"
+        });
+        const guardianA = await GuardianModel.create({
+            schoolId: schoolA,
+            userId: parentUserA._id,
+            name: "Guardian A",
+            phone: "03000000000",
+            relationship: "father"
+        });
+        const studentA = await StudentModel.create(makeStudent(schoolA, `ISO-A-${suffix.slice(0, 12)}`));
+        const studentB = await StudentModel.create(makeStudent(schoolB, `ISO-B-${suffix.slice(0, 12)}`));
+        await LinkModel.create({ schoolId: schoolA, studentId: studentA._id, guardianId: guardianA._id, isPrimary: true });
+
+        // Parent-child access resolves only through the explicit user link.
+        const linkedGuardians = await GuardianModel.find({ schoolId: schoolA, userId: parentUserA._id }).select("_id").lean();
+        const linkedLinks = await LinkModel.find({
+            schoolId: schoolA,
+            guardianId: { $in: linkedGuardians.map(({ _id }) => _id) }
+        }).lean();
+        const linkedStudentIds = [...new Set(linkedLinks.map(({ studentId }) => String(studentId)))];
+        assert.deepEqual(linkedStudentIds, [String(studentA._id)]);
+        assert.equal(linkedStudentIds.includes(String(studentB._id)), false);
+
+        // A parent user in school A must not resolve guardians belonging to school B.
+        assert.equal(await GuardianModel.countDocuments({ schoolId: schoolB, userId: parentUserA._id }), 0);
+
+        // Cross-school updates and deletes must not touch another tenant's record.
+        const crossUpdate = await StudentModel.updateOne(
+            { _id: studentA._id, schoolId: schoolB },
+            { $set: { lastName: "Hijacked" } }
+        );
+        assert.equal(crossUpdate.modifiedCount, 0, "a cross-tenant update must not modify the record");
+        const crossDelete = await StudentModel.deleteOne({ _id: studentA._id, schoolId: schoolB });
+        assert.equal(crossDelete.deletedCount, 0, "a cross-tenant delete must not remove the record");
+        assert.equal(
+            (await StudentModel.findOne({ _id: studentA._id, schoolId: schoolA })).lastName,
+            "Integration",
+            "the record must be unchanged after cross-tenant attempts"
+        );
+
+        // Same id, tenant-scoped read cannot leak across schools.
+        assert.equal(await StudentModel.findOne({ _id: studentB._id, schoolId: schoolA }), null);
+    } finally {
+        if (connection) {
+            try {
+                const existing = await connection.db.listCollections({}, { nameOnly: true }).toArray();
+                const existingNames = new Set(existing.map(({ name }) => name));
+                for (const collectionName of collectionNames) {
+                    if (existingNames.has(collectionName)) {
+                        await connection.dropCollection(collectionName);
+                    }
+                }
+            } finally {
+                await connection.close();
+            }
+        }
+    }
+});
+
+

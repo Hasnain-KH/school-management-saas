@@ -7,6 +7,7 @@ import LibraryBook from "../models/library-book.model.js";
 import LibraryLoan from "../models/library-loan.model.js";
 import School from "../models/school.model.js";
 import Student from "../models/student.model.js";
+import { createNotificationsForRoles } from "./notification.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
 
@@ -311,19 +312,36 @@ export const createAnnouncement = async (req, input) => {
     if (input.expiresAt && utcDate(input.expiresAt) < utcDate(new Date().toISOString().slice(0, 10))) {
         throw new HttpError(400, "Announcement expiry must not be in the past");
     }
-    return withTransaction(async (session) => {
-        const announcement = new Announcement({
+    const announcement = await withTransaction(async (session) => {
+        const created = new Announcement({
             ...input,
             schoolId,
             expiresAt: input.expiresAt ? utcDate(input.expiresAt) : undefined,
             createdBy: req.user._id
         });
-        await announcement.save({ session });
-        await writeAudit(req, session, "announcement.created", "announcement", announcement._id, {
-            audience: announcement.audience
+        await created.save({ session });
+        await writeAudit(req, session, "announcement.created", "announcement", created._id, {
+            audience: created.audience
         });
-        return announcement.toObject();
+        return created.toObject();
     });
+
+    // Best-effort in-app notifications. A notification failure must never fail
+    // the announcement itself, so this is intentionally outside the transaction.
+    try {
+        await createNotificationsForRoles({
+            schoolId,
+            roles: announcement.audience,
+            type: "announcement",
+            title: announcement.title,
+            body: announcement.body,
+            data: { announcementId: String(announcement._id) },
+            dedupeKey: `announcement:${announcement._id}`
+        });
+    } catch (error) {
+        console.error("Announcement notification fan-out failed", error?.name ?? "Error");
+    }
+    return announcement;
 };
 
 export const listAnnouncements = async (req, input) => {

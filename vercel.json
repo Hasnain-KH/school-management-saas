@@ -1,12 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
-  "outputDirectory":  "dist",
+  "outputDirectory":  "frontend/dist",
   "functions": {
     "api/[...path].mjs": {
       "includeFiles": "backend/src/**"
     }
   },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

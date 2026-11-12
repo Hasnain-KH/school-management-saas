@@ -3,6 +3,11 @@ import mongoose from "mongoose";
 const guardianSchema = new mongoose.Schema(
     {
         schoolId: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true, index: true },
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null
+        },
         name: { type: String, required: true, trim: true, maxlength: 120 },
         email: { type: String, lowercase: true, trim: true, maxlength: 254 },
         phone: { type: String, required: true, trim: true, maxlength: 30 },
@@ -20,6 +25,9 @@ const guardianSchema = new mongoose.Schema(
 
 guardianSchema.index({ schoolId: 1, phone: 1, name: 1 });
 guardianSchema.index({ schoolId: 1, email: 1 });
+// A parent user account may be linked to more than one guardian record (siblings),
+// so this is intentionally non-unique, but it is the authoritative parent-child join key.
+guardianSchema.index({ schoolId: 1, userId: 1 });
 
 const Guardian = mongoose.models.Guardian ?? mongoose.model("Guardian", guardianSchema);
 export default Guardian;

@@ -1,31 +1,32 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
-  Activity, Archive, Bell, BookOpen, CalendarDays, ChartNoAxesCombined,
-  CircleDollarSign, GraduationCap, LayoutDashboard, LibraryBig, Menu, School, Boxes,
+  Activity, Archive, Bell, BellRing, BookOpen, CalendarDays, ChartNoAxesCombined,
+  CircleDollarSign, FileText, GraduationCap, LayoutDashboard, LibraryBig, Menu, Receipt, School, Boxes,
   Settings2, Shield, Users, X
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 
 const roleGroups = {
   platform_super_admin: [
-    ["Platform", [["platform", "Overview", LayoutDashboard], ["platform/plans", "Plans", CircleDollarSign], ["platform/audit", "Audit log", Activity]]]
+    ["Platform", [["platform", "Overview", LayoutDashboard], ["platform/plans", "Plans", CircleDollarSign], ["platform/revenue", "Revenue", Receipt], ["platform/audit", "Audit log", Activity]]]
   ],
   school_admin: [
     ["Workspace", [["", "Overview", LayoutDashboard], ["students", "Students", GraduationCap], ["staff", "People", Users], ["academics", "Academics", BookOpen], ["attendance", "Attendance", Activity]]],
-    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["reports", "Reports", ChartNoAxesCombined]]],
-    ["Administration", [["subscriptions", "Subscription", Shield], ["school", "School profile", Settings2], ["audit", "Audit log", Activity]]]
+    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["reports", "Reports", ChartNoAxesCombined]]],
+    ["Administration", [["subscriptions", "Subscription", Shield], ["billing", "Billing history", Receipt], ["school", "School profile", Settings2], ["audit", "Audit log", Activity]]]
   ],
   principal: [
     ["Workspace", [["", "Overview", LayoutDashboard], ["students", "Students", GraduationCap], ["staff", "People", Users], ["academics", "Academics", BookOpen], ["attendance", "Attendance", Activity]]],
-    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["reports", "Reports", ChartNoAxesCombined]]],
+    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["reports", "Reports", ChartNoAxesCombined]]],
     ["Administration", [["audit", "Audit log", Activity]]]
   ],
   teacher: [
-    ["My classroom", [["", "Overview", LayoutDashboard], ["attendance", "Attendance", Activity], ["academics", "Timetable", BookOpen], ["exams", "Exams & results", ChartNoAxesCombined], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell]]]
+    ["My classroom", [["", "Overview", LayoutDashboard], ["attendance", "Attendance", Activity], ["academics", "Timetable", BookOpen], ["exams", "Exams & results", ChartNoAxesCombined], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText]]]
   ],
   parent: [
-    ["Family", [["", "Overview", LayoutDashboard], ["my-children", "My children", GraduationCap], ["calendar", "School calendar", CalendarDays], ["announcements", "Announcements", Bell]]]
+    ["Family", [["", "Overview", LayoutDashboard], ["my-children", "My children", GraduationCap], ["calendar", "School calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText]]]
   ]
 };
 
@@ -62,7 +63,7 @@ export default function PortalShell() {
     </aside>
     {menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
     <main className="main-area">
-      <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={21} /></button><div className="breadcrumbs"><span>{school?.name || "SchoolFlow"}</span><span className="crumb-slash">/</span><strong>{roleName(user?.role)}</strong></div><div className="topbar-actions"><span className="status-pill">{school?.status || roleName(user?.role)}</span><span className="topbar-avatar" aria-hidden="true">{user?.name?.slice(0, 1) || "U"}</span></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={21} /></button><div className="breadcrumbs"><span>{school?.name || "SchoolFlow"}</span><span className="crumb-slash">/</span><strong>{roleName(user?.role)}</strong></div><div className="topbar-actions">{user?.role !== "platform_super_admin" && <NotificationBell />}<span className="status-pill">{school?.status || roleName(user?.role)}</span><span className="topbar-avatar" aria-hidden="true">{user?.name?.slice(0, 1) || "U"}</span></div></header>
       <div className="page-frame"><Outlet /></div>
     </main>
   </div>;

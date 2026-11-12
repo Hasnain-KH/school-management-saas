@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 import { requirePermission, requirePlanFeature, requireTenant } from "../middleware/authorization.middleware.js";
 import { objectIdSchema, validate } from "../validators/common.validator.js";
 import {
+    guardianAccountLinkSchema,
     guardianCreateSchema,
     guardianQuerySchema,
     guardianUpdateSchema,
@@ -35,6 +36,8 @@ router.get("/guardians", requirePermission("students:read"), validate(guardianQu
 router.post("/guardians", requirePermission("students:manage"), validate(guardianCreateSchema), controller.addGuardian);
 router.patch("/guardians/:guardianId", requirePermission("students:manage"), validate(guardianParams, "params"), validate(guardianUpdateSchema), controller.editGuardian);
 router.delete("/guardians/:guardianId", requirePermission("students:manage"), validate(guardianParams, "params"), controller.archiveGuardian);
+router.put("/guardians/:guardianId/account", requirePermission("students:manage"), validate(guardianParams, "params"), validate(guardianAccountLinkSchema), controller.linkGuardianAccount);
+router.delete("/guardians/:guardianId/account", requirePermission("students:manage"), validate(guardianParams, "params"), controller.unlinkGuardianAccount);
 router.put("/:studentId/guardians/:guardianId", requirePermission("students:manage"), validate(studentGuardianParams, "params"), validate(studentGuardianSchema), controller.linkGuardian);
 router.delete("/:studentId/guardians/:guardianId", requirePermission("students:manage"), validate(studentGuardianParams, "params"), controller.unlinkGuardian);
 

@@ -38,6 +38,10 @@ import FixedAsset from "../src/models/fixed-asset.model.js";
 import FixedAssetAssignment from "../src/models/fixed-asset-assignment.model.js";
 import FixedAssetDepreciation from "../src/models/fixed-asset-depreciation.model.js";
 import FeeReminderDelivery from "../src/models/fee-reminder-delivery.model.js";
+import JobRun from "../src/models/job-run.model.js";
+import Notification from "../src/models/notification.model.js";
+import SchoolDocument from "../src/models/document.model.js";
+import Payment from "../src/models/payment.model.js";
 
 const models = [
     School,
@@ -76,7 +80,11 @@ const models = [
     FixedAsset,
     FixedAssetAssignment,
     FixedAssetDepreciation,
-    FeeReminderDelivery
+    FeeReminderDelivery,
+    Notification,
+    SchoolDocument,
+    Payment,
+    JobRun
 ];
 
 const createIndexes = async () => {

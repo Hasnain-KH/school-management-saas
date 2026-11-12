@@ -13,6 +13,14 @@ import { HttpError } from "../utils/http-error.js";
 
 const hashToken = (token) => createHash("sha256").update(token).digest("hex");
 
+const isTransactionUnsupported = (error) => {
+    const message = String(error?.message ?? "");
+    return error?.code === 20
+        || error?.codeName === "IllegalOperation"
+        || /Transaction numbers are only allowed on a replica set member or mongos/i.test(message)
+        || /does not support (?:multi-document )?transactions/i.test(message);
+};
+
 const toPublicUser = (user) => ({
     id: user._id.toString(),
     name: user.name,
@@ -150,6 +158,14 @@ export const registerSchool = async (input) => {
     } catch (error) {
         if (error?.code === 11000) {
             throw new HttpError(409, "That school slug is already registered");
+        }
+        // A standalone MongoDB deployment cannot run multi-document transactions.
+        // Registration must not leave partial records, so surface an actionable error.
+        if (isTransactionUnsupported(error)) {
+            throw new HttpError(
+                503,
+                "School registration requires a MongoDB replica set (MongoDB Atlas provides this by default)"
+            );
         }
         throw error;
     } finally {
