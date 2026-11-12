@@ -1,9 +1,9 @@
 {
   "name": "schoolflow-saas",
   "private": true,
-  "engines": {
-    "node": ">=20.19.0"
-  },
+ "engines": {
+  "node": "22.x"
+},
   "workspaces": [
     "frontend",
     "backend"
