@@ -10,8 +10,8 @@ See [`backend/docs/ENVIRONMENT.md`](../backend/docs/ENVIRONMENT.md) for the comp
 |---|---|---|---|---|
 | MongoDB Atlas | **Yes** | All persistence; transactions need a replica set | `MONGO_URI` | — (startup fails) |
 | Redis-compatible store | **Yes in production** | Shared rate limiting across serverless instances | `RATE_LIMIT_REDIS_URL` | `503` (fails closed) |
-| Email provider | Optional | Password reset, email verification, overdue fee reminders, welcome/notification mail | `EMAIL_API_KEY`, `EMAIL_FROM` (+ optional `EMAIL_API_URL`, `EMAIL_REPLY_TO`) | `503` |
-| S3-compatible object storage | Optional | Document upload/download | `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY` (+ optional region/path-style) | `503` |
+| Email provider | Optional | Password reset, email verification, overdue fee reminders, welcome/notification mail | `EMAIL_API_KEY`, `EMAIL_FROM` (+ optional `EMAIL_API_URL`, `EMAIL_REPLY_TO`, `REQUIRE_EMAIL_VERIFICATION`) | `503` |
+| Object storage (S3-compatible or Cloudinary) | Optional | Document upload/download | `STORAGE_PROVIDER` plus `STORAGE_*` or `CLOUDINARY_*` | `503` |
 | External scheduler | Optional | Runs overdue-reminder and subscription-expiry jobs | `JOBS_RUNNER_SECRET` | `503` (endpoint disabled) |
 | Payment gateway | Optional (adapter not implemented) | Online subscription checkout; manual payment recording and revenue reporting work without it | — | `503` on checkout |
 | Monitoring/alerting | Recommended | Alerting on errors and failed jobs | — (platform-native) | Vercel runtime logs only |
@@ -43,12 +43,23 @@ SchoolFlow ships a **Resend-compatible JSON-over-HTTP** sender (no SDK dependenc
 
 | Workflow | Endpoint/trigger |
 |---|---|
-| Password reset | `POST /api/v1/auth/forgot-password` |
-| Email verification | Registration / `POST /api/v1/auth/verify-email` |
+| Password reset | `POST /api/v1/auth/password-recovery` (request) and `POST /api/v1/auth/password-reset` (complete) |
+| Email verification | Registration/staff creation (when mandatory verification is on), or `POST /api/v1/auth/email-verification` (resend); completed at `POST /api/v1/auth/email-verification/confirm` |
 | Overdue fee reminders | `POST /api/v1/finance/reminders/overdue/dispatch`, or the `fee_reminders` job |
 | Welcome and generic notifications | Sent on relevant events |
 
 When email is **not** configured, these return an explicit `503` and no tokens are returned to clients or persisted.
+
+### Verification policy
+
+Configuring a provider only enables **delivery**. It never locks out existing accounts. Mandatory email verification is a separate, opt-in flag:
+
+- `REQUIRE_EMAIL_VERIFICATION=true` — newly created accounts (school registration, staff, and parent accounts) must verify before they receive an authenticated session; they are emailed a link on creation.
+- Default (unset/`false`) — registration and login behave exactly as before, and enabling email delivery does not force anyone to verify.
+- Accounts that already exist are never marked and never blocked retroactively; they can still verify voluntarily.
+- Enabling the flag without `EMAIL_API_KEY` and `EMAIL_FROM` fails configuration validation at startup with a clear error, so the platform cannot create accounts that are unable to verify.
+
+Safe rollout: configure and test delivery first, then set `REQUIRE_EMAIL_VERIFICATION=true` so only new signups are affected. See [`backend/docs/ENVIRONMENT.md`](../backend/docs/ENVIRONMENT.md) for the full policy and rollout notes.
 
 ### Configure
 
@@ -67,13 +78,23 @@ When email is **not** configured, these return an explicit `503` and no tokens a
 
 ## 4. Document storage (optional)
 
-Uploads are sent as base64 JSON to `POST /api/v1/documents` (this is why the app needs no multipart parser and works unchanged on serverless). Files are stored in **S3-compatible** object storage — AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO, and similar. Downloads are served through short-lived **presigned URLs** (15-minute default).
+Uploads are sent as base64 JSON to `POST /api/v1/documents` (this is why the app needs no multipart parser and works unchanged on serverless). Files are stored in either **S3-compatible** object storage — AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO, and similar — or in **Cloudinary**. `STORAGE_PROVIDER` selects the default adapter (`s3` or `cloudinary`); Cloudinary is never selected implicitly.
+
+Downloads are served through short-lived signed URLs (15-minute default). School logos are streamed through the authenticated same-origin proxy at `GET /api/v1/schools/me/logo`; the browser never sees a bucket URL or a Cloudinary host.
 
 - Limits: **5 MB** per file; allowed types are PDF, JPEG, PNG, WebP, and Word/Excel documents.
-- The API stores only metadata and a `sha256` checksum; bytes live in the bucket. Deleting a document soft-deletes metadata and removes the object.
+- The API stores metadata, `storageKey`, a `storageProvider` marker, and a `sha256` checksum; bytes live in the configured provider. Deleting a document soft-deletes metadata and removes the object.
+- Cloudinary assets are uploaded as authenticated `raw` files with deterministic, school-prefixed public IDs such as `schoolflow/<schoolId>/<category>/...` and `schoolflow/logos/<schoolId>/...`. Original bytes are preserved; no Cloudinary transformations are applied.
 - Parents can only list/download documents tied to their explicitly linked children.
+- Existing S3-backed records continue to resolve through the S3 adapter after a provider switch. Phase 1 does not migrate existing objects.
 
 ### Configure
+
+| Variable | Notes |
+|---|---|
+| `STORAGE_PROVIDER` | `s3` (default) or `cloudinary`. An unsupported value fails configuration. |
+
+S3-compatible adapter (used when `STORAGE_PROVIDER=s3`):
 
 | Variable | Notes |
 |---|---|
@@ -83,13 +104,25 @@ Uploads are sent as base64 JSON to `POST /api/v1/documents` (this is why the app
 | `STORAGE_REGION` | Optional; default `us-east-1`. |
 | `STORAGE_FORCE_PATH_STYLE` | Optional; `true` unless set to the literal `false`. Set `false` for virtual-hosted-style endpoints. |
 
-Keep the bucket private — access is granted only through signed URLs.
+Cloudinary adapter (used when `STORAGE_PROVIDER=cloudinary`):
+
+| Variable | Notes |
+|---|---|
+| `CLOUDINARY_CLOUD_NAME` | Cloud identifier. |
+| `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Backend-only credentials; never expose them in `VITE_*` variables. |
+| `CLOUDINARY_FOLDER` | Optional; default `schoolflow`. Public-ID prefix only, not an authorization boundary. |
+| `CLOUDINARY_SIGNED_URL_TTL` | Optional; default `900` seconds. |
+| `CLOUDINARY_SECURE` | Optional; `true` unless set to the literal `false`. |
+
+Keep the S3 bucket private and Cloudinary assets authenticated — access is granted only through signed URLs.
 
 ### Verify
 
 - Upload a small PDF from the **Documents** screen, confirm it appears, then download it.
-- Confirm the presigned URL works and expires; confirm delete removes the object.
-- If upload returns `503`, storage is not configured.
+- Confirm the signed URL works and expires; confirm delete removes the object.
+- With Cloudinary, confirm authenticated `raw` delivery and a school-prefixed public ID.
+- If upload returns `503`, the selected provider is not configured.
+- Before any real-account check, follow the opt-in, disposable-asset procedure in [`CLOUDINARY-SMOKE-TEST.md`](../backend/docs/CLOUDINARY-SMOKE-TEST.md). Keep the S3 `STORAGE_*` variables configured: existing S3-backed records continue to resolve through S3 after Cloudinary is selected for new uploads.
 
 ## 5. Scheduled jobs (optional)
 

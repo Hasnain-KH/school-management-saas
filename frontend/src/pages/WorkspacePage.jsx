@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, BookOpen, CircleDollarSign, Download, Plus, Search, Users } from "lucide-react";
+import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Ban, BookOpen, CircleDollarSign, Download, Pencil, Plus, RefreshCw, Search, Users } from "lucide-react";
 import { api, get, patch, post, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import Modal from "../components/Modal.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import RowMenu from "../components/RowMenu.jsx";
+import SchoolLogo from "../components/SchoolLogo.jsx";
 import { EmptyState, ErrorState, LoadingState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import SchoolLogoManager from "./SchoolLogoManager.jsx";
 import { exportCsv, exportExcel, printPdf } from "../utils/export.js";
-import { normalizeAttendanceRoster } from "../utils/attendance-roster.js";
+import { buildStudentAttendancePayload, lateStudentsMissingCheckIn, normalizeAttendanceRoster } from "../utils/attendance-roster.js";
 import { buildExamPayload } from "../utils/exam-payload.js";
 import { buildFeeAssignmentPayload, buildVoucherGenerationPayload } from "../utils/finance-workflows.js";
 import AcademicSetupPage from "./AcademicSetupPage.jsx";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const month = () => new Date().toISOString().slice(0, 7);
+const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const pageMap = {
   students: { title: "Students", description: "Manage student records, admissions, and placements.", endpoint: "/students", permission: ["school_admin", "principal"], create: studentFields, columns: ["admissionNumber", "firstName", "lastName", "status"], query: { status: "enrolled" } },
   staff: { title: "People", description: "Manage teachers, principals, and parent access.", endpoint: "/users", permission: ["school_admin"], create: userFields, columns: ["name", "email", "role", "status"] },
@@ -99,7 +103,7 @@ export default function WorkspacePage({ page }) {
 
   useEffect(() => { load(); }, [page]);
   const visibleColumns = useMemo(() => page === "academics" && user.role === "teacher"
-    ? ["dayOfWeek", "periodNumber", "startsAt", "endsAt", "room", "sectionId", "classSubjectId"]
+    ? ["dayOfWeek", "periodNumber", "startsAt", "endsAt", "room", "sectionName", "subjectName"]
     : page === "library" && libraryLoans ? ["bookId", "studentId", "checkedOutAt", "dueAt", "status", "returnedAt"]
     : config?.columns || getColumns(items), [config, items, libraryLoans, page, user.role]);
   const createFields = useMemo(() => config?.create?.() || [], [config]);
@@ -148,7 +152,7 @@ export default function WorkspacePage({ page }) {
   return <><PageHeader title={title} description={description} action={canManage && !libraryLoans && <button className="button button-primary" onClick={() => setModal(true)}><Plus size={16} />Add {title.replace(/s$/, "").toLowerCase()}</button>} />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">{page === "library" && <div className="tabs" role="group" aria-label="Library view">{[["books", "Books"], ["loans", "Loans"]].map(([value, label]) => <button key={value} type="button" aria-pressed={filters.libraryTab === value} className={filters.libraryTab === value ? "tab active-tab" : "tab"} onClick={() => load({ page: 1, libraryTab: value })}>{label}</button>)}</div>}<div className="table-toolbar"><div><strong>{libraryLoans ? "Library loans" : `${title} directory`}</strong><span>{meta?.pagination?.total ?? items.length} records</span></div>{!libraryLoans && <form className="search-field" onSubmit={onSearch}><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${title.toLowerCase()}…`} aria-label={`Search ${title}`} /><button type="submit">Search</button></form>}</div>
-      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <><div className="table-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column}>{columnLabel(column)}</th>)}{page === "inventory" && <th>Stock movement</th>}{page === "library" && !libraryLoans && canManage && <th>Available copies</th>}{libraryLoans && canManage && <th>Action</th>}{["students", "staff", "academics"].includes(page) && canManage && <th>Actions</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id || item.id}>{visibleColumns.map((column) => <td key={column}><Cell value={item[column]} column={column} /></td>)}{page === "inventory" && <td><MovementButtons item={item} onMove={(type) => setRowAction({ type, item })} /></td>}{page === "library" && !libraryLoans && canManage && <td>{item.copiesAvailable > 0 ? <button className="button button-small button-outline" onClick={() => setRowAction({ type: "issue", item })}>Issue book</button> : <span className="muted">No copies</span>}</td>}{libraryLoans && canManage && <td>{item.status === "checked_out" ? <button className="button button-small button-outline" disabled={busy} onClick={() => returnLoan(item)}>Return book</button> : <span className="muted">Returned</span>}</td>}{["students", "staff", "academics"].includes(page) && canManage && <td><button className="button button-small button-outline" onClick={() => setRowAction({ type: "edit", item })}>Edit</button></td>}</tr>)}</tbody></table></div><Pagination pagination={meta?.pagination} onPage={(value) => load({ page: value })} /></> : <EmptyState title={libraryLoans ? "No library loans" : `No ${title.toLowerCase()} to show`} detail={canManage ? "Create a record to get started. Your records will appear here." : "Records will appear here when your school has added them."} />}
+      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <><div className="table-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column}>{columnLabel(column)}</th>)}{page === "inventory" && <th>Stock movement</th>}{page === "library" && !libraryLoans && canManage && <th>Available copies</th>}{libraryLoans && canManage && <th>Action</th>}{["students", "staff", "academics"].includes(page) && canManage && <th>Actions</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id || item.id}>{visibleColumns.map((column) => <td key={column}><Cell value={item[column]} column={column} /></td>)}{page === "inventory" && <td><MovementButtons item={item} onMove={(type) => setRowAction({ type, item })} /></td>}{page === "library" && !libraryLoans && canManage && <td>{item.copiesAvailable > 0 ? <button className="button button-small button-outline" onClick={() => setRowAction({ type: "issue", item })}>Issue book</button> : <span className="muted">No copies</span>}</td>}{libraryLoans && canManage && <td>{item.status === "checked_out" ? <button className="button button-small button-outline" disabled={busy} onClick={() => returnLoan(item)}>Return book</button> : <span className="muted">Returned</span>}</td>}{["students", "staff", "academics"].includes(page) && canManage && <td>{page === "students" ? <RowMenu label={`Actions for ${item.firstName} ${item.lastName}`} items={[{ label: "Edit details", icon: <Pencil size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "edit", item }) }, { label: "Change status", icon: <ArrowRightLeft size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "status", item }) }]} /> : <button className="button button-small button-outline" onClick={() => setRowAction({ type: "edit", item })}>Edit</button>}</td>}</tr>)}</tbody></table></div><Pagination pagination={meta?.pagination} onPage={(value) => load({ page: value })} /></> : <EmptyState title={libraryLoans ? "No library loans" : `No ${title.toLowerCase()} to show`} detail={canManage ? "Create a record to get started. Your records will appear here." : "Records will appear here when your school has added them."} />}
     </section>
     {modal && <CreateModal title={`Add ${title.replace(/s$/, "").toLowerCase()}`} fields={createFields} busy={busy} onClose={() => setModal(false)} onSubmit={onCreate} />}
     {rowAction && <RowActionModal page={page} action={rowAction} busy={busy} onClose={() => setRowAction(null)} onSubmit={async (event) => {
@@ -161,12 +165,18 @@ export default function WorkspacePage({ page }) {
           if (body.level !== undefined) body.level = Number(body.level);
           if (body.isActive !== undefined) body.isActive = body.isActive === "true";
           await patch(`${config.endpoint}/${rowAction.item._id}`, body);
+        } else if (rowAction.type === "status") {
+          await post(`/students/${rowAction.item._id}/status`, {
+            status: values.status,
+            ...(values.effectiveAt ? { effectiveAt: new Date(`${values.effectiveAt}T00:00:00.000Z`).toISOString() } : {}),
+            ...(values.notes ? { notes: values.notes } : {})
+          });
         } else if (rowAction.type === "received" || rowAction.type === "issued") {
           await post(`/operations/inventory/items/${rowAction.item._id}/transactions`, { type: rowAction.type, quantity: Number(values.quantity), reference: values.reference || undefined, note: values.note || undefined });
         } else {
           await post("/operations/library/loans", { bookId: rowAction.item._id, studentId: values.studentId, dueAt: values.dueAt, note: values.note || undefined });
         }
-        setNotice({ type: "success", message: rowAction.type === "edit" ? "Record updated." : rowAction.type === "issue" ? "Book issued." : "Inventory movement recorded." });
+        setNotice({ type: "success", message: rowAction.type === "edit" ? "Record updated." : rowAction.type === "status" ? "Student status updated." : rowAction.type === "issue" ? "Book issued." : "Inventory movement recorded." });
         setRowAction(null); await load();
       } catch (reason) { setNotice({ type: "error", message: reason.message }); }
       finally { setBusy(false); }
@@ -181,7 +191,29 @@ async function loadPage(page, config, filters, search, user, school) {
     const sessions = await get("/academics/sessions?status=active&limit=1");
     const active = sessions.items?.[0];
     if (!active) return { items: [] };
-    return get(`/academics/timetable${queryString({ academicSessionId: active._id, page: filters.page || 1, limit: 100 })}`);
+    const [timetable, classResult, sectionResult, subjectResult, assignmentResult] = await Promise.all([
+      get(`/academics/timetable${queryString({ academicSessionId: active._id, page: filters.page || 1, limit: 100 })}`),
+      get("/academics/classes?limit=100"),
+      get("/academics/sections?limit=100"),
+      get("/academics/subjects?limit=100"),
+      get(`/academics/class-subjects${queryString({ academicSessionId: active._id, limit: 100 })}`)
+    ]);
+    const classes = new Map((classResult.items || []).map((item) => [String(item._id), item.name]));
+    const sections = new Map((sectionResult.items || []).map((item) => [String(item._id), item]));
+    const subjects = new Map((subjectResult.items || []).map((item) => [String(item._id), item.name]));
+    const assignments = new Map((assignmentResult.items || []).map((item) => [String(item._id), item]));
+    const items = (timetable.items || []).map((row) => {
+      const sectionRef = row.sectionId && typeof row.sectionId === "object" ? row.sectionId._id : row.sectionId;
+      const assignmentRef = row.classSubjectId && typeof row.classSubjectId === "object" ? row.classSubjectId._id : row.classSubjectId;
+      const section = sections.get(String(sectionRef));
+      const assignment = assignments.get(String(assignmentRef));
+      return {
+        ...row,
+        sectionName: section ? [classes.get(String(section.classId)), section.name].filter(Boolean).join(" · ") : "",
+        subjectName: assignment ? subjects.get(String(assignment.subjectId)) || "" : ""
+      };
+    });
+    return { ...timetable, items };
   }
   if (page === "calendar" && ["teacher", "parent"].includes(user.role)) {
     const from = today();
@@ -196,6 +228,8 @@ async function loadPage(page, config, filters, search, user, school) {
 function PageHeader({ title, description, action }) { return <div className="page-intro"><div><div className="page-kicker">SCHOOLFLOW WORKSPACE</div><h1>{title}</h1><p>{description}</p></div>{action && <div className="intro-action">{action}</div>}</div>; }
 function Cell({ value, column }) {
   if (value === undefined || value === null || value === "") return <span className="muted">—</span>;
+  if (column === "dayOfWeek") return DAY_NAMES[Number(value)] || String(value);
+  if (column === "startsAt" || column === "endsAt") return String(value);
   if (column === "status" || column === "isActive" || ["type", "role"].includes(column)) return <span className={`badge badge-${String(value).toLowerCase()}`}>{column === "isActive" ? value ? "Active" : "Inactive" : value}</span>;
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "object") return <span className="muted">{value.name || value.code || "—"}</span>;
@@ -203,7 +237,8 @@ function Cell({ value, column }) {
   return String(value);
 }
 function getColumns(items) { return Object.keys(items[0] || {}).filter((key) => !["_id", "schoolId", "__v", "createdBy", "updatedAt"].includes(key)).slice(0, 6); }
-function columnLabel(value) { return value.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase()); }
+const COLUMN_LABELS = { sectionName: "Section", subjectName: "Subject", sectionId: "Section", classSubjectId: "Class subject", dayOfWeek: "Day", periodNumber: "Period", startsAt: "Starts", endsAt: "Ends", isActive: "Active", isDefaultTrial: "Default trial" };
+function columnLabel(value) { return COLUMN_LABELS[value] || value.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase()); }
 function Pagination({ pagination, onPage }) { if (!pagination || pagination.pages < 2) return null; return <div className="pagination"><span>Page {pagination.page} of {pagination.pages} · {pagination.total} records</span><div><button disabled={pagination.page <= 1} onClick={() => onPage(pagination.page - 1)}>Previous</button><button disabled={pagination.page >= pagination.pages} onClick={() => onPage(pagination.page + 1)}>Next</button></div></div>; }
 function CreateModal({ title, fields, busy, onClose, onSubmit }) {
   const [values, setValues] = useState(() => Object.fromEntries(fields.map((field) => [field.name, field.defaultValue || ""])));
@@ -221,7 +256,7 @@ function CreateModal({ title, fields, busy, onClose, onSubmit }) {
         const suffix = params.toString() ? `?${params}` : "";
         const result = await get(`${path}${suffix}`);
         const data = field.source === "branches" ? result.branches || [] : result.items || [];
-        return [field.name, data.map((item) => ({ value: item._id || item.id, label: item.name || item.code || item.title || String(item._id || item.id) }))];
+        return [field.name, data.map((item) => ({ value: item._id || item.id, label: item.name || [item.firstName, item.lastName].filter(Boolean).join(" ") || item.admissionNumber || item.code || item.title || String(item._id || item.id) }))];
       });
       const loaded = await Promise.all(requests);
       if (active) setOptions(Object.fromEntries(loaded));
@@ -232,17 +267,17 @@ function CreateModal({ title, fields, busy, onClose, onSubmit }) {
     return () => { active = false; };
   }, [fields, dependencyKey]);
 
-  return <Modal title={title} onClose={onClose}><form className="form-stack modal-form" onSubmit={onSubmit}><div className="form-grid">{fields.map((field) => <label className={field.type === "textarea" ? "field-wide" : ""} key={field.name}>{field.label}{field.required && <span className="required"> *</span>}{field.type === "select" ? <select name={field.name} required={field.required} value={values[field.name] || ""} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}><option value="" disabled>{options[field.name]?.length ? "Select…" : options.__error || "No options available"}</option>{field.options?.map((option) => <option key={option} value={option}>{option.replace(/_/g, " ")}</option>)}{options[field.name]?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea name={field.name} required={field.required} defaultValue={field.defaultValue || ""} rows={4} /> : <input name={field.name} type={field.type || "text"} required={field.required} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} />} {field.hint && <small className="field-hint">{field.hint}</small>}</label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button disabled={busy} className="button button-primary">{busy ? "Saving…" : "Create record"}</button></div></form></Modal>;
+  return <Modal title={title} onClose={onClose}><form className="form-stack modal-form" onSubmit={onSubmit}><div className="form-grid">{fields.map((field) => <label className={field.type === "textarea" ? "field-wide" : ""} key={field.name}>{field.label}{field.required && <span className="required"> *</span>}{field.type === "select" ? <select name={field.name} required={field.required} value={values[field.name] || ""} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}><option value="" disabled>{field.options?.length || options[field.name]?.length ? "Select…" : options.__error || "No options available"}</option>{field.options?.map((option) => <option key={option} value={option}>{option.replace(/_/g, " ")}</option>)}{options[field.name]?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea name={field.name} required={field.required} defaultValue={field.defaultValue || ""} rows={4} /> : <input name={field.name} type={field.type || "text"} required={field.required} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} />} {field.hint && <small className="field-hint">{field.hint}</small>}</label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button disabled={busy} className="button button-primary">{busy ? "Saving…" : "Create record"}</button></div></form></Modal>;
 }
 
 function AttendancePage() {
-  const [sections, setSections] = useState([]); const [sectionId, setSectionId] = useState(""); const [date, setDate] = useState(today()); const [roster, setRoster] = useState([]); const [status, setStatus] = useState({}); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [sectionsError, setSectionsError] = useState(false); const [notice, setNotice] = useState(null);
+  const [sections, setSections] = useState([]); const [sectionId, setSectionId] = useState(""); const [date, setDate] = useState(today()); const [roster, setRoster] = useState([]); const [status, setStatus] = useState({}); const [checkIn, setCheckIn] = useState({}); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [sectionsError, setSectionsError] = useState(false); const [notice, setNotice] = useState(null);
   const loadSections = async () => { setLoading(true); setError(""); setSectionsError(false); try { const result = await get("/academics/sections?isActive=true&limit=100"); setSections(result.items || []); if (!sectionId && result.items?.[0]) setSectionId(result.items[0]._id); } catch (reason) { setError(reason.message); setSectionsError(true); } finally { setLoading(false); } };
   useEffect(() => { loadSections(); }, []);
-  const loadRoster = useCallback(async () => { if (!sectionId) return; setLoading(true); setError(""); try { const result = await get(`/attendance/students${queryString({ date, sectionId })}`); const rows = normalizeAttendanceRoster(result.items || result.students || []); setRoster(rows); setStatus(Object.fromEntries(rows.map((student) => [student.id, student.status]))); } catch (reason) { setError(reason.message); } finally { setLoading(false); } }, [sectionId, date]);
+  const loadRoster = useCallback(async () => { if (!sectionId) return; setLoading(true); setError(""); try { const result = await get(`/attendance/students${queryString({ date, sectionId })}`); const rows = normalizeAttendanceRoster(result.items || result.students || []); setRoster(rows); setStatus(Object.fromEntries(rows.map((student) => [student.id, student.status]))); setCheckIn(Object.fromEntries(rows.map((student) => [student.id, student.checkIn || ""]))); } catch (reason) { setError(reason.message); } finally { setLoading(false); } }, [sectionId, date]);
   useEffect(() => { loadRoster(); }, [loadRoster]);
-  const save = async () => { setBusy(true); try { await post("/attendance/students", { date, sectionId, records: roster.map((student) => ({ studentId: student.id, status: status[student.id] || "present" })) }); setNotice({ type: "success", message: "Attendance saved for this class." }); await loadRoster(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } };
-  return <><PageHeader title="Attendance" description="Record student attendance for a class and school day." action={<button disabled={!roster.length || busy} className="button button-primary" onClick={save}><CheckIcon />{busy ? "Saving…" : "Save attendance"}</button>} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card table-card"><div className="filter-toolbar"><label>Section<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Choose a section</option>{sections.map((section) => <option key={section._id} value={section._id}>{section.className || section.classId} · {section.name}</option>)}</select></label><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={sectionsError ? loadSections : loadRoster} /> : roster.length ? <div className="table-scroll"><table><thead><tr><th>Student</th><th>Admission no.</th><th>Attendance status</th></tr></thead><tbody>{roster.map((student) => { const id = student.id; return <tr key={id}><td><strong>{student.firstName} {student.lastName}</strong></td><td>{student.admissionNumber || "—"}</td><td><select className="inline-select" value={status[id] || "present"} onChange={(event) => setStatus((current) => ({ ...current, [id]: event.target.value }))}>{["present", "absent", "late", "leave"].map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select></td></tr>; })}</tbody></table></div> : <EmptyState title="Choose a class section" detail="Available roster records follow your assigned-class permissions." />}</section></>;
+  const save = async () => { if (lateStudentsMissingCheckIn(roster, status, checkIn).length) { setNotice({ type: "error", message: "Add a check-in time for every student marked late." }); return; } setBusy(true); try { await post("/attendance/students", buildStudentAttendancePayload({ date, sectionId, roster, status, checkIn })); setNotice({ type: "success", message: "Attendance saved for this class." }); await loadRoster(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } };
+  return <><PageHeader title="Attendance" description="Record student attendance for a class and school day." action={<button disabled={!roster.length || busy} className="button button-primary" onClick={save}><CheckIcon />{busy ? "Saving…" : "Save attendance"}</button>} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card table-card"><div className="filter-toolbar"><label>Section<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Choose a section</option>{sections.map((section) => <option key={section._id} value={section._id}>{section.className || section.classId} · {section.name}</option>)}</select></label><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={sectionsError ? loadSections : loadRoster} /> : roster.length ? <div className="table-scroll"><table><thead><tr><th>Student</th><th>Admission no.</th><th>Attendance status</th><th>Check-in time</th></tr></thead><tbody>{roster.map((student) => { const id = student.id; const value = status[id] || "present"; return <tr key={id}><td><strong>{student.firstName} {student.lastName}</strong></td><td>{student.admissionNumber || "—"}</td><td><select className="inline-select" value={value} onChange={(event) => setStatus((current) => ({ ...current, [id]: event.target.value }))}>{["present", "absent", "late", "leave"].map((option) => <option key={option} value={option}>{option[0].toUpperCase() + option.slice(1)}</option>)}</select></td><td>{value === "late" ? <input className="inline-select" type="time" required value={checkIn[id] || ""} onChange={(event) => setCheckIn((current) => ({ ...current, [id]: event.target.value }))} aria-label={`Check-in time for ${student.firstName} ${student.lastName}`} /> : <span className="muted">—</span>}</td></tr>; })}</tbody></table></div> : <EmptyState title="Choose a class section" detail="Available roster records follow your assigned-class permissions." />}</section></>;
 }
 
 function FinancePage() {
@@ -893,7 +928,7 @@ function SubscriptionPage({ page }) {
         <table><thead><tr>{tab === "schools" ? ["name", "slug", "email", "status", "subscription"].map((key) => <th key={key}>{columnLabel(key)}</th>) : ["name", "code", "priceMinor", "currency", "billingInterval", "limits", "isActive", "isDefaultTrial"].map((key) => <th key={key}>{columnLabel(key)}</th>)}<th>Actions</th></tr></thead>
           <tbody>{items.map((item) => <tr key={item._id}>{tab === "schools" ? <>
             <td><strong>{item.name}</strong></td><td>{item.slug}</td><td>{item.email}</td><td><span className={`badge badge-${item.status}`}>{item.status}</span></td><td>{item.subscription?.plan || item.subscription?.status || "Unassigned"}</td>
-            <td><div className="row-actions"><button className="button button-small button-outline" onClick={() => setDialog({ type: "school-plan", school: item })}>Manage plan</button><button className="button button-small button-outline" onClick={() => toggleSchool(item)}>{item.status === "suspended" ? "Reactivate" : "Suspend"}</button></div></td>
+            <td><RowMenu label={`Actions for ${item.name}`} items={[{ label: "Manage plan", icon: <CircleDollarSign size={15} aria-hidden="true" />, onSelect: () => setDialog({ type: "school-plan", school: item }) }, { label: item.status === "suspended" ? "Reactivate school" : "Suspend school", icon: item.status === "suspended" ? <RefreshCw size={15} aria-hidden="true" /> : <Ban size={15} aria-hidden="true" />, danger: item.status !== "suspended", onSelect: () => toggleSchool(item) }]} /></td>
           </> : <>
             <td><strong>{item.name}</strong></td><td>{item.code}</td><td>{formatMinor(item.priceMinor, item.currency)}</td><td>{item.currency}</td><td>{item.billingInterval}</td><td><ul className="limit-list">{Object.entries(item.limits || {}).map(([key, limit]) => <li key={key}>{columnLabel(key)}: {limit ?? "Unlimited"}</li>)}</ul></td><td><span className={`badge badge-${item.isActive ? "active" : "suspended"}`}>{item.isActive ? "Active" : "Inactive"}</span></td><td>{item.isDefaultTrial ? "Default trial" : "—"}</td>
             <td><button disabled={item.isDefaultTrial && item.isActive} className="button button-small button-outline" onClick={() => updatePlanAvailability(item)}>{item.isActive ? "Deactivate" : "Activate"}</button></td>
@@ -941,10 +976,32 @@ function SchoolPlanModal({ school, busy, onClose, onSubmit }) {
 }
 
 function SchoolProfile() {
-  const [school, setSchool] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
-  const load = async () => { setLoading(true); try { setSchool((await get("/schools/me")).school); } catch (reason) { setError(reason.message); } finally { setLoading(false); } };
+  const [school, setSchool] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try { setSchool((await get("/schools/me")).school); }
+    catch (reason) { setError(reason.message); }
+    finally { setLoading(false); }
+  };
   useEffect(() => { load(); }, []);
-  return <><PageHeader title="School profile" description="Identity and subscription status for your school." />{loading ? <LoadingState /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : <div className="content-card profile-card"><div className="profile-logo">{school.name?.slice(0, 1)}</div><h2>{school.name}</h2><p>{school.email}</p><div className="profile-details">{[["Workspace URL", school.slug], ["Status", school.status], ["Plan", school.subscription?.plan], ["Subscription status", school.subscription?.status], ["Current period end", school.subscription?.currentPeriodEnd ? new Date(school.subscription.currentPeriodEnd).toLocaleDateString() : "—"]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value || "—"}</strong></div>)}</div></div>}</>;
+
+  const handleLogoChange = (logo) => setSchool((current) => current ? { ...current, logo } : current);
+
+  return <>
+    <PageHeader title="School profile" description="Identity and subscription status for your school." />
+    {loading ? <LoadingState /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : <>
+      <div className="content-card profile-card">
+        <span className="profile-logo"><SchoolLogo school={school} size={36} fallback={school.name?.slice(0, 1)} /></span>
+        <h2>{school.name}</h2>
+        <p>{school.email}</p>
+        <div className="profile-details">{[["Workspace URL", school.slug], ["Status", school.status], ["Plan", school.subscription?.plan], ["Subscription status", school.subscription?.status], ["Current period end", school.subscription?.currentPeriodEnd ? new Date(school.subscription.currentPeriodEnd).toLocaleDateString() : "—"]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value || "—"}</strong></div>)}</div>
+      </div>
+      <SchoolLogoManager school={school} onUpdated={handleLogoChange} />
+    </>}
+  </>;
 }
 
 function ParentChildren() {
@@ -984,9 +1041,15 @@ function MovementButtons({ item, onMove }) {
 }
 
 function RowActionModal({ page, action, busy, onClose, onSubmit }) {
-  let title = action.type === "edit" ? "Update record" : action.type === "issue" ? "Issue library book" : `${action.type === "received" ? "Receive" : "Issue"} inventory`;
+  let title = action.type === "edit" ? "Update record" : action.type === "status" ? "Change student status" : action.type === "issue" ? "Issue library book" : `${action.type === "received" ? "Receive" : "Issue"} inventory`;
   let fields;
-  if (action.type === "edit" && page === "students") {
+  if (action.type === "status") {
+    fields = [
+      { name: "status", label: "New status", type: "select", options: ["withdrawn", "transferred", "graduated"], required: true, defaultValue: "" },
+      { name: "effectiveAt", label: "Effective date", type: "date", defaultValue: today() },
+      { name: "notes", label: "Notes" }
+    ];
+  } else if (action.type === "edit" && page === "students") {
     fields = [
       { name: "firstName", label: "First name", defaultValue: action.item.firstName },
       { name: "lastName", label: "Last name", defaultValue: action.item.lastName },
@@ -1009,7 +1072,7 @@ function RowActionModal({ page, action, busy, onClose, onSubmit }) {
     ];
   } else if (action.type === "issue") {
     fields = [
-      { name: "studentId", label: "Student record ID", required: true },
+      { name: "studentId", label: "Student", type: "select", required: true, endpoint: "/students?status=enrolled&limit=100", source: "items", hint: "Only currently enrolled students can borrow a book." },
       { name: "dueAt", label: "Due date", type: "date", defaultValue: today(), required: true },
       { name: "note", label: "Note" }
     ];

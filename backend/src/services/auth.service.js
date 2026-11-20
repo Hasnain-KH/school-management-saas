@@ -6,8 +6,12 @@ import AuditLog from "../models/audit-log.model.js";
 import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
 import SubscriptionPlan from "../models/subscription-plan.model.js";
-import { isEmailDeliveryConfigured } from "./email-delivery.provider.js";
+import { toPublicLogo } from "../utils/school-logo.js";
 import { requestEmailVerification } from "./account-security.service.js";
+import {
+    requiresEmailVerification,
+    shouldMarkNewAccountsForVerification
+} from "./email-verification.policy.js";
 import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -40,7 +44,8 @@ export const toPublicSchool = (school) => ({
     status: school.status,
     subscription: school.subscription,
     branches: school.branches,
-    settings: school.settings
+    settings: school.settings,
+    logo: toPublicLogo(school.logo)
 });
 
 const createTokenPair = async (user, schoolId, session, familyId = randomUUID()) => {
@@ -110,6 +115,7 @@ export const registerSchool = async (input) => {
     if (!trialPlan) {
         throw new HttpError(503, "School registration is unavailable until a default trial plan is configured");
     }
+    const verificationRequired = shouldMarkNewAccountsForVerification();
     const session = await mongoose.startSession();
     let result;
 
@@ -143,11 +149,17 @@ export const registerSchool = async (input) => {
                 email: input.email,
                 passwordHash: input.password,
                 role: "school_admin",
-                status: "active"
+                status: "active",
+                emailVerificationRequired: verificationRequired
             });
             await user.save({ session });
-            const tokens = await createTokenPair(user, school._id, session);
             await recordRegistration(school, user, session);
+
+            // When verification is required, no authenticated session is created
+            // for an unverified account: no cookies, no persisted refresh session.
+            const tokens = verificationRequired
+                ? {}
+                : await createTokenPair(user, school._id, session);
 
             result = {
                 user: toPublicUser(user),
@@ -172,8 +184,17 @@ export const registerSchool = async (input) => {
         await session.endSession();
     }
 
-    if (isEmailDeliveryConfigured()) {
-        await requestEmailVerification({ email: input.email, schoolSlug: result.school.slug });
+    if (verificationRequired) {
+        // The account is already committed, so a transient delivery failure must
+        // not orphan it or misreport registration. The account can request a new
+        // link from the resend-verification flow at any time.
+        try {
+            await requestEmailVerification({ email: input.email, schoolSlug: result.school.slug });
+        } catch {
+            console.error("Verification email delivery failed during registration", {
+                userId: String(result.user.id)
+            });
+        }
         return {
             user: result.user,
             school: result.school,
@@ -216,9 +237,7 @@ export const login = async ({ schoolSlug, email, password }) => {
     if (user.status !== "active") {
         throw new HttpError(403, "This account is disabled");
     }
-    if (user.role !== "platform_super_admin"
-        && isEmailDeliveryConfigured()
-        && !user.emailVerifiedAt) {
+    if (requiresEmailVerification(user)) {
         throw new HttpError(403, "Email address verification is required");
     }
     if (user.role === "platform_super_admin") {

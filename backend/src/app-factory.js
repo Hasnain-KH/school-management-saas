@@ -62,9 +62,11 @@ export const createApp = ({ rateLimitOptions } = {}) => {
     }));
     app.use(cookieParser());
     app.use(csrfProtection);
-    // Document uploads carry base64 payloads, so they need a larger JSON body
-    // limit. Mounting this before the global parser lets it win for that path.
+    // Document and logo uploads carry base64 payloads, so they need a larger
+    // JSON body limit. Mounting these before the global parser lets them win.
     app.use("/api/v1/documents", express.json({ limit: "8mb" }));
+    // A 2 MB logo expands to roughly 2.7 MB of base64.
+    app.use("/api/v1/schools/me/logo", express.json({ limit: "3mb" }));
     // Gateway webhooks must be verified against the exact bytes the provider
     // signed, so capture the raw body for that path before the JSON parser.
     app.use("/api/v1/payments/webhook", express.raw({ type: "*/*", limit: "200kb" }));

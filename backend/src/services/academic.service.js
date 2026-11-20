@@ -382,10 +382,8 @@ export const archiveSection = async (req, id) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
         const section = await findOwned(Section, schoolId, id, "Section", session);
-        const [timetable, teacher] = await Promise.all([
-            TimetableEntry.exists({ schoolId, sectionId: id }).session(session),
-            ClassTeacherAssignment.exists({ schoolId, sectionId: id }).session(session)
-        ]);
+        const timetable = await TimetableEntry.exists({ schoolId, sectionId: id }).session(session);
+        const teacher = await ClassTeacherAssignment.exists({ schoolId, sectionId: id }).session(session);
         if (timetable || teacher) {
             throw new HttpError(409, "Section has academic assignments and cannot be archived");
         }
@@ -441,10 +439,8 @@ export const assignSubject = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
         await assertSession(schoolId, input.academicSessionId, session);
-        const [academicClass, subject] = await Promise.all([
-            AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session),
-            Subject.findOne({ _id: input.subjectId, schoolId, isActive: true }).session(session)
-        ]);
+        const academicClass = await AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session);
+        const subject = await Subject.findOne({ _id: input.subjectId, schoolId, isActive: true }).session(session);
         if (!academicClass || !subject) {
             throw new HttpError(404, "Active class or subject was not found in this school");
         }
@@ -487,15 +483,13 @@ export const removeClassSubject = async (req, id) => {
 export const assignClassTeacher = async (req, sectionId, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [section, academicSession] = await Promise.all([
-            Section.findOne({
-                _id: sectionId,
-                schoolId,
-                academicSessionId: input.academicSessionId,
-                isActive: true
-            }).session(session),
-            assertSession(schoolId, input.academicSessionId, session)
-        ]);
+        const section = await Section.findOne({
+            _id: sectionId,
+            schoolId,
+            academicSessionId: input.academicSessionId,
+            isActive: true
+        }).session(session);
+        const academicSession = await assertSession(schoolId, input.academicSessionId, session);
         if (!section) {
             throw new HttpError(404, "Active section was not found in this academic session");
         }
@@ -557,20 +551,23 @@ export const removeClassTeacher = async (req, sectionId, academicSessionId) => {
 };
 
 const validateTimetableRefs = async (schoolId, input, session) => {
-    const [section, classSubject] = await Promise.all([
-        Section.findOne({
-            _id: input.sectionId,
-            schoolId,
-            academicSessionId: input.academicSessionId,
-            isActive: true
-        }).session(session),
-        ClassSubject.findOne({
-            _id: input.classSubjectId,
-            schoolId,
-            academicSessionId: input.academicSessionId,
-            isActive: true
-        }).session(session)
-    ]);
+    // A MongoDB session must not be used for concurrent operations inside a
+    // transaction. Parallel .session(session) queries make the driver issue two
+    // startTransaction commands at the same txnNumber, which the server rejects
+    // with MongoServerError 117 (ConflictingOperationInProgress). Run these
+    // reads sequentially on the same session instead.
+    const section = await Section.findOne({
+        _id: input.sectionId,
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        isActive: true
+    }).session(session);
+    const classSubject = await ClassSubject.findOne({
+        _id: input.classSubjectId,
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        isActive: true
+    }).session(session);
     if (!section || !classSubject) {
         throw new HttpError(404, "Section or class-subject assignment was not found");
     }

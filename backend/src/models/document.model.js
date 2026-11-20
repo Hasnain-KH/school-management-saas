@@ -16,6 +16,7 @@ const documentSchema = new mongoose.Schema(
         contentType: { type: String, required: true, trim: true, maxlength: 120 },
         sizeBytes: { type: Number, required: true, min: 1 },
         storageKey: { type: String, required: true, trim: true, maxlength: 512 },
+        storageProvider: { type: String, enum: ["s3", "cloudinary"], default: "s3", trim: true },
         checksum: { type: String, trim: true, maxlength: 128 },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
         isActive: { type: Boolean, default: true, required: true }

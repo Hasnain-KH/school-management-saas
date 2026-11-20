@@ -23,7 +23,7 @@ These are the steps that require decisions, accounts, or access outside the repo
 ## Optional integrations (only if the school needs them)
 
 11. **Email delivery** — set `EMAIL_API_KEY`, `EMAIL_FROM` (and optionally `EMAIL_API_URL`, `EMAIL_REPLY_TO`, `APP_BASE_URL`) to enable password reset, verification, reminders, and notifications. Until then those endpoints return `503`. See [`EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md#3-email-delivery-optional).
-12. **Document storage** — set `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY` (and optionally region/path-style) to enable uploads/downloads. See [`EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md#4-document-storage-optional).
+12. **Document storage** — keep `STORAGE_PROVIDER=s3` (default) with `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY` (and optionally region/path-style), or set `STORAGE_PROVIDER=cloudinary` with `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` to enable uploads/downloads. See [`EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md#4-document-storage-optional).
 13. **Payment gateway** — implement and register an adapter for `payment-gateway.provider.js` (`createCheckoutSession` + `verifyWebhook`) if online checkout is wanted. Manual payment recording and revenue reporting already work without it. See [`EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md#6-payments).
 
 ## Optional code work (not required for launch)

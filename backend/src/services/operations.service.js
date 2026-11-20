@@ -223,14 +223,12 @@ export const issueLibraryBook = async (req, input) => {
         throw new HttpError(400, "Loan due date must not be in the past");
     }
     return withTransaction(async (session) => {
-        const [student, book] = await Promise.all([
-            Student.findOne({ _id: input.studentId, schoolId, status: "enrolled" }).session(session),
-            LibraryBook.findOneAndUpdate(
-                { _id: input.bookId, schoolId, isActive: true, copiesAvailable: { $gt: 0 } },
-                { $inc: { copiesAvailable: -1 } },
-                { new: true, runValidators: true, session }
-            )
-        ]);
+        const student = await Student.findOne({ _id: input.studentId, schoolId, status: "enrolled" }).session(session);
+        const book = await LibraryBook.findOneAndUpdate(
+            { _id: input.bookId, schoolId, isActive: true, copiesAvailable: { $gt: 0 } },
+            { $inc: { copiesAvailable: -1 } },
+            { new: true, runValidators: true, session }
+        );
         if (!student) throw new HttpError(404, "Enrolled student was not found in this school");
         if (!book) {
             const exists = await LibraryBook.exists({ _id: input.bookId, schoolId }).session(session);

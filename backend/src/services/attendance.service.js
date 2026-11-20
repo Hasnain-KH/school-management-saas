@@ -47,21 +47,19 @@ const assertSectionAccess = async (req, sectionId, session) => {
     if (!section) throw new HttpError(404, "Active section was not found in this school");
 
     if (req.user.role === "teacher") {
-        const [classTeacher, subjectTeacher] = await Promise.all([
-            ClassTeacherAssignment.exists({
-                schoolId,
-                academicSessionId: section.academicSessionId,
-                sectionId,
-                teacherId: req.user._id
-            }).session(session),
-            ClassSubject.exists({
-                schoolId,
-                academicSessionId: section.academicSessionId,
-                classId: section.classId,
-                teacherId: req.user._id,
-                isActive: true
-            }).session(session)
-        ]);
+        const classTeacher = await ClassTeacherAssignment.exists({
+            schoolId,
+            academicSessionId: section.academicSessionId,
+            sectionId,
+            teacherId: req.user._id
+        }).session(session);
+        const subjectTeacher = await ClassSubject.exists({
+            schoolId,
+            academicSessionId: section.academicSessionId,
+            classId: section.classId,
+            teacherId: req.user._id,
+            isActive: true
+        }).session(session);
         if (!classTeacher && !subjectTeacher) {
             throw new HttpError(403, "Teachers may only access attendance for their assigned classes");
         }

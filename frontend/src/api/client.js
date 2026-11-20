@@ -1,4 +1,4 @@
-const API_BASE = (
+export const API_BASE = (
   import.meta.env.VITE_API_URL
   || (import.meta.env.DEV ? "http://localhost:5000/api/v1" : "/api/v1")
 ).replace(/\/$/, "");

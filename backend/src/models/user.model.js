@@ -15,6 +15,10 @@ const userSchema = new mongoose.Schema(
         phone: { type: String, trim: true, maxlength: 30 },
         jobTitle: { type: String, trim: true, maxlength: 80 },
         emailVerifiedAt: { type: Date },
+        // Set to true only for accounts created while REQUIRE_EMAIL_VERIFICATION is
+        // enabled. Pre-existing records have no value, which is treated as false,
+        // so enabling verification never locks out existing users retroactively.
+        emailVerificationRequired: { type: Boolean, default: false },
         passwordHash: { type: String, required: true, select: false },
         role: {
             type: String,

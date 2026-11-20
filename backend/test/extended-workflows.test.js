@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import mongoose from "mongoose";
+import AcademicClass from "../src/models/academic-class.model.js";
 import AuditLog from "../src/models/audit-log.model.js";
 import FixedAsset from "../src/models/fixed-asset.model.js";
 import FeeVoucher from "../src/models/fee-voucher.model.js";
 import Guardian from "../src/models/guardian.model.js";
 import Student from "../src/models/student.model.js";
 import StudentGuardian from "../src/models/student-guardian.model.js";
+import Section from "../src/models/section.model.js";
 import User from "../src/models/user.model.js";
 import { hasPermission } from "../src/middleware/authorization.middleware.js";
 import {
@@ -27,16 +29,22 @@ const withMockedTransaction = (t) => {
     t.mock.method(AuditLog.prototype, "save", async function saveAudit() { return this; });
 };
 
-test("parent self-service is school-scoped and only returns explicitly linked students (mocked models)", async () => {
+test("parent self-service is school-scoped, returns explicitly linked students, and resolves class/section names (mocked models)", async () => {
     const schoolId = new mongoose.Types.ObjectId();
     const guardianId = new mongoose.Types.ObjectId();
     const studentId = new mongoose.Types.ObjectId();
+    const classId = new mongoose.Types.ObjectId();
+    const sectionId = new mongoose.Types.ObjectId();
     const originalGuardianFind = Guardian.find;
     const originalLinkFind = StudentGuardian.find;
     const originalStudentFind = Student.find;
+    const originalClassFind = AcademicClass.find;
+    const originalSectionFind = Section.find;
     let guardianFilter;
     let linkFilter;
     let studentFilter;
+    let classFilter;
+    let sectionFilter;
 
     Guardian.find = (filter) => {
         guardianFilter = filter;
@@ -57,11 +65,19 @@ test("parent self-service is school-scoped and only returns explicitly linked st
                 firstName: "Ari",
                 lastName: "Taylor",
                 status: "enrolled",
-                classId: new mongoose.Types.ObjectId(),
-                sectionId: new mongoose.Types.ObjectId()
+                classId,
+                sectionId
             }]
         };
         return query;
+    };
+    AcademicClass.find = (filter) => {
+        classFilter = filter;
+        return { select: () => ({ lean: async () => [{ _id: classId, name: "Grade 1", code: "G1" }] }) };
+    };
+    Section.find = (filter) => {
+        sectionFilter = filter;
+        return { select: () => ({ lean: async () => [{ _id: sectionId, name: "A" }] }) };
     };
 
     try {
@@ -73,6 +89,10 @@ test("parent self-service is school-scoped and only returns explicitly linked st
         const students = await listParentStudents(req);
         assert.equal(students.length, 1);
         assert.equal(students[0].id, String(studentId));
+        // The parent dashboard consumes these fields directly; IDs alone are not enough.
+        assert.equal(students[0].className, "Grade 1");
+        assert.equal(students[0].classCode, "G1");
+        assert.equal(students[0].sectionName, "A");
         assert.equal(guardianFilter.schoolId, schoolId);
         // Authorization must key off the explicit user link, never a mutable email value.
         assert.equal(guardianFilter.userId, parentUserId);
@@ -80,10 +100,14 @@ test("parent self-service is school-scoped and only returns explicitly linked st
         assert.equal(linkFilter.schoolId, schoolId);
         assert.equal(studentFilter.schoolId, schoolId);
         assert.deepEqual(studentFilter._id.$in, [String(studentId)]);
+        assert.equal(classFilter.schoolId, schoolId);
+        assert.equal(sectionFilter.schoolId, schoolId);
     } finally {
         Guardian.find = originalGuardianFind;
         StudentGuardian.find = originalLinkFind;
         Student.find = originalStudentFind;
+        AcademicClass.find = originalClassFind;
+        Section.find = originalSectionFind;
     }
 });
 

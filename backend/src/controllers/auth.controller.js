@@ -6,6 +6,7 @@ import {
 } from "../services/account-security.service.js";
 import { authCookieNames, clearAuthCookies, setAuthCookies } from "../security/auth-cookies.js";
 import { issueCsrfToken } from "../middleware/csrf.middleware.js";
+import { toPublicLogo } from "../utils/school-logo.js";
 import { sendSuccess } from "../utils/responses.js";
 
 export const register = async (req, res) => {
@@ -53,7 +54,8 @@ export const currentUser = async (req, res) => {
             name: req.school.name,
             slug: req.school.slug,
             status: req.school.status,
-            subscription: req.school.subscription
+            subscription: req.school.subscription,
+            logo: toPublicLogo(req.school.logo)
         }
         : null;
 

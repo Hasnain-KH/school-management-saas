@@ -5,6 +5,7 @@ import PortalShell from "./components/PortalShell.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { LoadingState } from "./components/feedback.jsx";
 const AuthPage = lazy(() => import("./pages/AuthPage.jsx"));
+const VerifyEmailPage = lazy(() => import("./pages/VerifyEmailPage.jsx"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage.jsx"));
 const WorkspacePage = lazy(() => import("./pages/WorkspacePage.jsx"));
 const FixedAssetsPage = lazy(() => import("./pages/FixedAssetsPage.jsx"));
@@ -43,6 +44,8 @@ export default function App() {
     <Route path="/register" element={<Guest><AuthPage mode="register" /></Guest>} />
     <Route path="/forgot-password" element={<Guest><AuthPage mode="recovery" /></Guest>} />
     <Route path="/reset-password" element={<Guest><AuthPage mode="reset" /></Guest>} />
+    <Route path="/verify-email" element={<Guest><VerifyEmailPage /></Guest>} />
+    <Route path="/resend-verification" element={<Guest><AuthPage mode="resend" /></Guest>} />
     <Route element={<Protected><PortalShell /></Protected>}>
       <Route index element={<DashboardPage />} />
       <Route path="students" element={<WorkspaceRoute page="students" />} />

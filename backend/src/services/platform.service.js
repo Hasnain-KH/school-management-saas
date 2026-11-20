@@ -146,10 +146,8 @@ export const updateSchoolStatus = async (req, schoolId, status) => withTransacti
 });
 
 export const updateSchoolSubscription = async (req, schoolId, input) => withTransaction(async (session) => {
-    const [school, plan] = await Promise.all([
-        School.findById(schoolId).session(session),
-        SubscriptionPlan.findOne({ _id: input.planId, isActive: true }).session(session)
-    ]);
+    const school = await School.findById(schoolId).session(session);
+    const plan = await SubscriptionPlan.findOne({ _id: input.planId, isActive: true }).session(session);
     if (!school) throw new HttpError(404, "School was not found");
     if (!plan) throw new HttpError(404, "An active subscription plan was not found");
     if (input.status === "trial" && !plan.isDefaultTrial) {

@@ -4,7 +4,7 @@ import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
 import SubscriptionPlan from "../models/subscription-plan.model.js";
 import User from "../models/user.model.js";
-import { isEmailDeliveryConfigured } from "../services/email-delivery.provider.js";
+import { requiresEmailVerification } from "../services/email-verification.policy.js";
 import { authCookieNames } from "../security/auth-cookies.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -35,9 +35,7 @@ export const requireAuth = async (req, res, next) => {
         if (!session || !user || user.status !== "active" || String(session.userId) !== String(user._id)) {
             return next(unauthorized());
         }
-        if (user.role !== "platform_super_admin"
-            && isEmailDeliveryConfigured()
-            && !user.emailVerifiedAt) {
+        if (requiresEmailVerification(user)) {
             return next(new HttpError(403, "Email address verification is required"));
         }
 

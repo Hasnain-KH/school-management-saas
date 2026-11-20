@@ -1,3 +1,4 @@
+import AcademicClass from "../models/academic-class.model.js";
 import Exam from "../models/exam.model.js";
 import ExamMark from "../models/exam-mark.model.js";
 import FeePayment from "../models/fee-payment.model.js";
@@ -6,6 +7,7 @@ import Guardian from "../models/guardian.model.js";
 import Student from "../models/student.model.js";
 import StudentAttendance from "../models/student-attendance.model.js";
 import StudentGuardian from "../models/student-guardian.model.js";
+import Section from "../models/section.model.js";
 import { HttpError } from "../utils/http-error.js";
 
 const tenantId = (req) => {
@@ -54,15 +56,33 @@ export const listParentStudents = async (req) => {
         .sort({ lastName: 1, firstName: 1, _id: 1 })
         .select("_id admissionNumber firstName lastName status classId sectionId")
         .lean();
-    return students.map((student) => ({
-        id: String(student._id),
-        admissionNumber: student.admissionNumber,
-        firstName: student.firstName,
-        lastName: student.lastName,
-        status: student.status,
-        classId: String(student.classId),
-        sectionId: String(student.sectionId)
-    }));
+
+    // The parent role has no academic:read permission, so the portal must
+    // resolve class/section names itself. Every lookup stays tenant-scoped.
+    const classIds = [...new Set(students.map(({ classId }) => String(classId)))];
+    const sectionIds = [...new Set(students.map(({ sectionId }) => String(sectionId)))];
+    const [classes, sections] = await Promise.all([
+        AcademicClass.find({ schoolId, _id: { $in: classIds } }).select("name code").lean(),
+        Section.find({ schoolId, _id: { $in: sectionIds } }).select("name").lean()
+    ]);
+    const classNames = new Map(classes.map((item) => [String(item._id), item]));
+    const sectionNames = new Map(sections.map((item) => [String(item._id), item.name]));
+
+    return students.map((student) => {
+        const classInfo = classNames.get(String(student.classId));
+        return {
+            id: String(student._id),
+            admissionNumber: student.admissionNumber,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            status: student.status,
+            classId: String(student.classId),
+            className: classInfo?.name ?? "",
+            classCode: classInfo?.code ?? "",
+            sectionId: String(student.sectionId),
+            sectionName: sectionNames.get(String(student.sectionId)) ?? ""
+        };
+    });
 };
 
 export const getParentStudentAttendance = async (req, studentId, input = {}) => {

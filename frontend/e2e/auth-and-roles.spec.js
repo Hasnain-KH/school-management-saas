@@ -73,6 +73,30 @@ test("school admin can open every workspace and each renders an empty state with
   expect(pageErrors).toEqual([]);
 });
 
+// The principal role has no users:manage or audit:read permission, so those
+// routes redirect to the dashboard. The sidebar must not advertise them.
+test("principal navigation only links to pages the role is permitted to open", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const principal = roles.find(({ role }) => role === "principal");
+  await signInAs(page, principal);
+  const navigation = page.getByRole("navigation", { name: "Main navigation" });
+  // Wait for the lazily-rendered sidebar to populate before asserting absence,
+  // otherwise an empty navigation would trivially satisfy a zero-count check.
+  await expect(navigation.getByRole("link", { name: "Attendance", exact: true })).toBeVisible();
+
+  await expect(navigation.getByRole("link", { name: "People", exact: true })).toHaveCount(0);
+  await expect(navigation.getByRole("link", { name: "Audit log", exact: true })).toHaveCount(0);
+
+  const destinations = [["Overview", "/"], ["Students", "/students"], ["Academics", "/academics"], ["Attendance", "/attendance"], ["Fees & finance", "/finance"], ["Exams & results", "/exams"], ["Inventory", "/inventory"], ["Fixed assets", "/assets"], ["Library", "/library"], ["Calendar", "/calendar"], ["Announcements", "/announcements"], ["Notifications", "/notifications"], ["Documents", "/documents"], ["Reports", "/reports"]];
+  for (const [link, path] of destinations) {
+    await navigation.getByRole("link", { name: link, exact: true }).click();
+    await expect(page, `${link} should stay on ${path}`).toHaveURL(new RegExp(`${path.replace(/\//g, "\\/")}$`));
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+  }
+  expect(pageErrors).toEqual([]);
+});
+
 test("login displays API rejection without storing a browser-readable token", async ({ page }) => {
   await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
   await page.route(`${api}/auth/login`, (route) => respond(route, 401, null, "Invalid credentials"));
@@ -138,7 +162,9 @@ test("school workspace stays within a narrow mobile viewport", async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 });
   for (const link of ["Overview", "Students", "Academics", "Attendance", "Fees & finance", "Exams & results", "Fixed assets", "Reports"]) {
     await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: link, exact: true }).click();
+    const target = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: link, exact: true });
+    await expect(target).toBeVisible();
+    await target.click();
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width, `${link} should not create horizontal page overflow`).toBeLessThanOrEqual(390);
   }

@@ -43,6 +43,18 @@ const schoolSchema = new mongoose.Schema(
         settings: {
             attendanceLateGraceMinutes: { type: Number, min: 0, max: 180, default: 10 },
             attendanceStartTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, default: "08:00" }
+        },
+        // Metadata only. Image bytes are stored in the durable object store.
+        logo: {
+            storageKey: { type: String, trim: true, maxlength: 512 },
+            storageProvider: { type: String, enum: ["s3", "cloudinary"], default: "s3", trim: true },
+            contentType: { type: String, trim: true, maxlength: 64 },
+            sizeBytes: { type: Number, min: 1 },
+            fileName: { type: String, trim: true, maxlength: 240 },
+            checksum: { type: String, trim: true, maxlength: 128 },
+            version: { type: Number, min: 1, default: 1 },
+            uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+            updatedAt: { type: Date }
         }
     },
     { timestamps: true, strict: "throw" }

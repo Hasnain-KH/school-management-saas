@@ -4,6 +4,8 @@ import { HttpError } from "../utils/http-error.js";
 import { tenantFilter } from "../middleware/authorization.middleware.js";
 import { withTransaction } from "../utils/transaction.js";
 import { assertPlanCapacity } from "../utils/plan-limits.js";
+import { requestEmailVerification } from "./account-security.service.js";
+import { shouldMarkNewAccountsForVerification } from "./email-verification.policy.js";
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -49,8 +51,9 @@ export const createUser = async (req, input) => {
     if (!schoolId || String(req.school?._id) !== String(schoolId)) {
         throw new HttpError(403, "A matching school tenant context is required");
     }
+    const verificationRequired = shouldMarkNewAccountsForVerification();
 
-    return withTransaction(async (session) => {
+    const user = await withTransaction(async (session) => {
         if (["school_admin", "principal", "teacher"].includes(input.role)) {
             await assertPlanCapacity(req, session, "staff");
         }
@@ -62,7 +65,8 @@ export const createUser = async (req, input) => {
             jobTitle: input.jobTitle,
             role: input.role,
             passwordHash: input.password,
-            status: "active"
+            status: "active",
+            emailVerificationRequired: verificationRequired
         });
         await user.save({ session });
         const audit = new AuditLog({
@@ -76,6 +80,20 @@ export const createUser = async (req, input) => {
         await audit.save({ session });
         return user;
     });
+
+    if (verificationRequired) {
+        // Send after the transaction commits. A transient delivery failure must
+        // not roll back the account; the member can request a new link from the
+        // resend-verification flow.
+        try {
+            await requestEmailVerification({ email: user.email, schoolSlug: req.school.slug });
+        } catch {
+            console.error("Verification email delivery failed for a new account", {
+                userId: String(user._id)
+            });
+        }
+    }
+    return user;
 };
 
 export const updateUser = async (req, userId, input) => {

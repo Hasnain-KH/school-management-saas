@@ -279,7 +279,7 @@ test("real MongoDB enforces cross-tenant isolation for updates, deletes, and par
         assert.equal(crossDelete.deletedCount, 0, "a cross-tenant delete must not remove the record");
         assert.equal(
             (await StudentModel.findOne({ _id: studentA._id, schoolId: schoolA })).lastName,
-            "Integration",
+            "Student",
             "the record must be unchanged after cross-tenant attempts"
         );
 

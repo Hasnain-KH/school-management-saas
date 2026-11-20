@@ -34,7 +34,7 @@ There are no required frontend environment variables for the default local or sa
 
 ## Optional external providers (email delivery and document storage)
 
-These variables are optional. When they are absent, SchoolFlow keeps its safe defaults: email-dependent workflows (password reset, verification, overdue reminders) return an explicit `503`, and document upload/download returns `503`. Setting the variables wires in the built-in adapters — a Resend-compatible HTTP email sender and an S3-compatible object store — without code changes. See [external services](./EXTERNAL-SERVICES.md).
+These variables are optional. When they are absent, SchoolFlow keeps its safe defaults: email-dependent workflows (password reset, verification, overdue reminders) return an explicit `503`, and document upload/download returns `503`. Setting the variables wires in the built-in adapters — a Resend-compatible HTTP email sender and either an S3-compatible or Cloudinary object store — without code changes. `STORAGE_PROVIDER` defaults to `s3`; Cloudinary is selected only when it is explicitly set to `cloudinary`. See [external services](./EXTERNAL-SERVICES.md).
 
 | Variable | Required? | Local development | Vercel production | Default / behavior | Owner and use | External credential? |
 |---|---|---|---|---|---|---|
@@ -42,12 +42,32 @@ These variables are optional. When they are absent, SchoolFlow keeps its safe de
 | `EMAIL_FROM` | No | Optional. | Optional. Required (with `EMAIL_API_KEY`) to enable email. | Unset. A verified sender address, e.g. `SchoolFlow <no-reply@example.com>`. | Backend: `backend/src/services/email-delivery.provider.js`. | No; a verified sender identity. |
 | `EMAIL_API_URL` | No | Optional. | Optional. | `https://api.resend.com/emails`. Override for a Resend-compatible endpoint. | Backend: `backend/src/services/email-delivery.provider.js`. | No. |
 | `EMAIL_REPLY_TO` | No | Optional. | Optional. | Unset. | Backend: `backend/src/services/email-delivery.provider.js`. | No. |
-| `STORAGE_ENDPOINT` | No | Optional. | Optional. Required (with bucket and keys) to enable document storage. | Unset; document upload/download stays disabled (`503`). | Backend: `backend/src/services/document-storage.provider.js`. | No; an S3-compatible endpoint URL. |
+| `REQUIRE_EMAIL_VERIFICATION` | No | Optional. | Optional. | Unset; treated as `false`. Only the literal `true` enables mandatory verification. Requires `EMAIL_API_KEY` and `EMAIL_FROM`; startup/configuration validation fails closed if it is enabled without them. | Backend: `backend/src/config/env.js` and `backend/src/services/email-verification.policy.js`; controls whether newly created accounts must verify before signing in. | No. |
+| `STORAGE_PROVIDER` | No | Optional; defaults to `s3`. | Optional; set explicitly to `cloudinary` to select Cloudinary. | `s3`. Supported values: `s3`, `cloudinary`; an unsupported value fails configuration. | Backend: `backend/src/services/document-storage.provider.js`; selects the default storage adapter. | No. |
+| `CLOUDINARY_CLOUD_NAME` | No | Optional; required with the API key/secret when `STORAGE_PROVIDER=cloudinary`. | Same. | Unset. Cloudinary cloud identifier. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | No; public cloud identifier. |
+| `CLOUDINARY_API_KEY` | No | Optional; required to enable Cloudinary. | Same. | Unset. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | Yes: Cloudinary API key. |
+| `CLOUDINARY_API_SECRET` | No | Optional; required to enable Cloudinary. | Same. | Unset. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | Yes: Cloudinary API secret. |
+| `CLOUDINARY_FOLDER` | No | Optional. | Optional. | `schoolflow`. Prefix for deterministic public IDs; not an authorization boundary. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | No. |
+| `CLOUDINARY_SIGNED_URL_TTL` | No | Optional. | Optional. | `900` seconds, matching the S3 presigned URL default. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | No. |
+| `CLOUDINARY_SECURE` | No | Optional. | Optional. | `true` unless set to the literal `false`; HTTPS delivery. | Backend: `backend/src/services/cloudinary-storage.provider.js`. | No. |
+| `STORAGE_ENDPOINT` | No | Optional. | Optional. Required (with bucket and keys) to enable S3-compatible document storage. | Unset; S3 adapter is unavailable when incomplete. | Backend: `backend/src/services/document-storage.provider.js`. | No; an S3-compatible endpoint URL. |
 | `STORAGE_BUCKET` | No | Optional. | Optional. Required with `STORAGE_ENDPOINT` and keys. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
 | `STORAGE_ACCESS_KEY_ID` | No | Optional. | Optional. Required with the endpoint and bucket. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | Yes: object-storage access key. |
 | `STORAGE_SECRET_ACCESS_KEY` | No | Optional. | Optional. Required with the endpoint and bucket. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | Yes: object-storage secret key. |
 | `STORAGE_REGION` | No | Optional. | Optional. | `us-east-1`. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
 | `STORAGE_FORCE_PATH_STYLE` | No | Optional. | Optional. | `true` unless set to the literal `false`. Set `false` for virtual-hosted-style endpoints. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
+
+### Email verification policy and rollout for existing accounts
+
+Email **delivery** and mandatory email **verification** are independent. Configuring `EMAIL_API_KEY`/`EMAIL_FROM` enables delivery only; it never blocks an existing account. Mandatory verification is opt-in through `REQUIRE_EMAIL_VERIFICATION=true`, which is enforced only for accounts created while the flag is on (they carry `emailVerificationRequired: true` until they verify). This makes the flag safe to enable without locking anyone out:
+
+- **New accounts** created under the flag are marked, receive a verification email, and get no authenticated session until they verify. This covers school registration (the first school admin), staff created via `POST /users` (principal/teacher), and parent accounts created the same way.
+- **Existing accounts** have no marker, so they continue to sign in exactly as before. They are never retroactively forced to verify, and their email is never marked verified on their behalf.
+- **Voluntary verification** remains available to any account through `POST /auth/email-verification` and the `/verify-email` page; verifying a marked account simply clears the gate.
+- **Platform super admins** are always exempt so a deployment can never lock itself out.
+- Enabling the flag **without** a configured provider fails configuration validation at startup with a clear error instead of creating accounts that could never verify.
+
+Safe rollout order for an existing deployment: (1) configure and verify email delivery and confirm the resend flow works; (2) set `APP_BASE_URL` to the deployed origin; (3) only then set `REQUIRE_EMAIL_VERIFICATION=true` for new signups. Because legacy records are unmarked, turning the flag on affects only accounts created afterward.
 
 ## Test/tooling-only variables
 

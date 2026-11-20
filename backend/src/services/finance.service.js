@@ -93,15 +93,13 @@ export const listFeeCategories = async (req, input) => {
 export const createFeeStructure = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [academicSession, academicClass, categories] = await Promise.all([
-            AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session),
-            AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session),
-            FeeCategory.find({
-                _id: { $in: input.lineItems.map((item) => item.categoryId) },
-                schoolId,
-                isActive: true
-            }).session(session)
-        ]);
+        const academicSession = await AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session);
+        const academicClass = await AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session);
+        const categories = await FeeCategory.find({
+            _id: { $in: input.lineItems.map((item) => item.categoryId) },
+            schoolId,
+            isActive: true
+        }).session(session);
         if (!academicSession || academicSession.status === "completed" || !academicClass) {
             throw new HttpError(404, "Active academic session and class were not found in this school");
         }
@@ -142,10 +140,8 @@ export const listFeeStructures = async (req, input) => {
 export const createStudentFeeAssignment = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [student, structure] = await Promise.all([
-            Student.findOne({ _id: input.studentId, schoolId, status: "enrolled" }).session(session),
-            FeeStructure.findOne({ _id: input.feeStructureId, schoolId, isActive: true }).session(session)
-        ]);
+        const student = await Student.findOne({ _id: input.studentId, schoolId, status: "enrolled" }).session(session);
+        const structure = await FeeStructure.findOne({ _id: input.feeStructureId, schoolId, isActive: true }).session(session);
         if (!student) throw new HttpError(404, "Enrolled student was not found in this school");
         if (!structure) throw new HttpError(404, "Active fee structure was not found in this school");
         if (String(student.academicSessionId) !== String(structure.academicSessionId)

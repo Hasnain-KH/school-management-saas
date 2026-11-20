@@ -1,4 +1,5 @@
 import { HttpError } from "../utils/http-error.js";
+import { describeErrorForDevelopment } from "../utils/error-diagnostics.js";
 
 export const notFound = (req, res, next) =>
     next(new HttpError(404, "The requested route was not found"));
@@ -35,7 +36,14 @@ export const errorHandler = (error, req, res, next) => {
     }
 
     if (statusCode >= 500) {
-        console.error("Unhandled API error", error.name ?? "Error");
+        // Production keeps the minimal, safe log. Development adds MongoDB
+        // code/codeName, index shape and the failing stack frames so a real
+        // driver error can be diagnosed instead of being reduced to a name.
+        if (process.env.NODE_ENV !== "production") {
+            console.error("Unhandled API error", JSON.stringify(describeErrorForDevelopment(error, req)));
+        } else {
+            console.error("Unhandled API error", error.name ?? "Error");
+        }
         message = "An unexpected server error occurred";
     }
 

@@ -1,24 +1,56 @@
 import { createHash, createHmac } from "node:crypto";
 import { HttpError } from "../utils/http-error.js";
+import { createCloudinaryStorage } from "./cloudinary-storage.provider.js";
 
+const configuredProviders = new Map();
 let provider = null;
+let providerName = null;
 
-export const configureDocumentStorageProvider = (storage) => {
+const assertStorageContract = (storage) => {
     if (!storage
         || typeof storage.upload !== "function"
         || typeof storage.delete !== "function"
         || typeof storage.createDownloadUrl !== "function") {
         throw new TypeError("Document storage must implement upload, delete, and signed download URLs");
     }
-    provider = storage;
 };
 
-export const getDocumentStorageProvider = () => {
+// Registers a named adapter so a record written by one provider can still be
+// read after the default provider changes. The default provider is selected by
+// configureDocumentStorageProvider/configureDocumentStorageFromEnv.
+export const registerDocumentStorageProvider = (name, storage) => {
+    assertStorageContract(storage);
+    if (typeof name !== "string" || !name.trim()) {
+        throw new TypeError("A storage provider name is required");
+    }
+    configuredProviders.set(name, storage);
+    return storage;
+};
+
+export const configureDocumentStorageProvider = (storage, name = null) => {
+    assertStorageContract(storage);
+    provider = storage;
+    providerName = typeof name === "string" && name.trim() ? name : null;
+    if (providerName) configuredProviders.set(providerName, storage);
+};
+
+export const getDocumentStorageProvider = (name) => {
+    if (name) {
+        const named = configuredProviders.get(name);
+        if (named) return named;
+        // Unit tests and custom setups may inject a single unnamed adapter.
+        if (provider && configuredProviders.size === 0) return provider;
+        throw new HttpError(503, `Document storage provider "${name}" is not configured`);
+    }
     if (!provider) {
         throw new HttpError(503, "Document storage is unavailable until a storage provider is configured");
     }
     return provider;
 };
+
+// New records are tagged with the selected provider. The legacy default is s3
+// when a custom, unnamed adapter is injected (as in existing unit tests).
+export const getDocumentStorageProviderName = () => providerName ?? "s3";
 
 export const isDocumentStorageConfigured = () => provider !== null;
 
@@ -186,20 +218,57 @@ export const createS3CompatibleStorage = ({
 };
 
 // Configures object storage from environment variables, leaving the 503
-// behaviour in place when storage is not provisioned.
+// behaviour in place when the selected storage provider is not provisioned.
+// S3 remains the default; Cloudinary is used only when explicitly selected.
 export const configureDocumentStorageFromEnv = () => {
-    const { STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_ACCESS_KEY_ID, STORAGE_SECRET_ACCESS_KEY } = process.env;
-    if (!STORAGE_ENDPOINT || !STORAGE_BUCKET || !STORAGE_ACCESS_KEY_ID || !STORAGE_SECRET_ACCESS_KEY) {
-        return null;
+    const selected = String(process.env.STORAGE_PROVIDER ?? "s3").trim().toLowerCase();
+    if (selected !== "s3" && selected !== "cloudinary") {
+        throw new TypeError(`Unsupported STORAGE_PROVIDER "${selected}". Expected "s3" or "cloudinary".`);
     }
-    const storage = createS3CompatibleStorage({
-        endpoint: STORAGE_ENDPOINT,
-        bucket: STORAGE_BUCKET,
-        accessKeyId: STORAGE_ACCESS_KEY_ID,
-        secretAccessKey: STORAGE_SECRET_ACCESS_KEY,
-        region: process.env.STORAGE_REGION ?? "us-east-1",
-        forcePathStyle: process.env.STORAGE_FORCE_PATH_STYLE !== "false"
-    });
-    configureDocumentStorageProvider(storage);
-    return storage;
+
+    provider = null;
+    providerName = null;
+    configuredProviders.clear();
+
+    const {
+        STORAGE_ENDPOINT,
+        STORAGE_BUCKET,
+        STORAGE_ACCESS_KEY_ID,
+        STORAGE_SECRET_ACCESS_KEY,
+        CLOUDINARY_CLOUD_NAME,
+        CLOUDINARY_API_KEY,
+        CLOUDINARY_API_SECRET
+    } = process.env;
+
+    let s3Storage = null;
+    if (STORAGE_ENDPOINT && STORAGE_BUCKET && STORAGE_ACCESS_KEY_ID && STORAGE_SECRET_ACCESS_KEY) {
+        s3Storage = createS3CompatibleStorage({
+            endpoint: STORAGE_ENDPOINT,
+            bucket: STORAGE_BUCKET,
+            accessKeyId: STORAGE_ACCESS_KEY_ID,
+            secretAccessKey: STORAGE_SECRET_ACCESS_KEY,
+            region: process.env.STORAGE_REGION ?? "us-east-1",
+            forcePathStyle: process.env.STORAGE_FORCE_PATH_STYLE !== "false"
+        });
+        registerDocumentStorageProvider("s3", s3Storage);
+    }
+
+    let cloudinaryStorage = null;
+    if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
+        cloudinaryStorage = createCloudinaryStorage({
+            cloudName: CLOUDINARY_CLOUD_NAME,
+            apiKey: CLOUDINARY_API_KEY,
+            apiSecret: CLOUDINARY_API_SECRET,
+            folder: process.env.CLOUDINARY_FOLDER,
+            secure: process.env.CLOUDINARY_SECURE !== "false",
+            urlExpirySeconds: process.env.CLOUDINARY_SIGNED_URL_TTL
+        });
+        registerDocumentStorageProvider("cloudinary", cloudinaryStorage);
+    }
+
+    const selectedStorage = selected === "s3" ? s3Storage : cloudinaryStorage;
+    if (!selectedStorage) return null;
+
+    configureDocumentStorageProvider(selectedStorage, selected);
+    return selectedStorage;
 };

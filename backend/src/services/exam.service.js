@@ -50,17 +50,15 @@ const pageData = (page, limit, total) => ({
 export const createExam = async (req, input) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [academicSession, academicClass, classSubjects] = await Promise.all([
-            AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session),
-            AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session),
-            ClassSubject.find({
-                _id: { $in: input.subjects.map(({ classSubjectId }) => classSubjectId) },
-                schoolId,
-                academicSessionId: input.academicSessionId,
-                classId: input.classId,
-                isActive: true
-            }).session(session)
-        ]);
+        const academicSession = await AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session);
+        const academicClass = await AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session);
+        const classSubjects = await ClassSubject.find({
+            _id: { $in: input.subjects.map(({ classSubjectId }) => classSubjectId) },
+            schoolId,
+            academicSessionId: input.academicSessionId,
+            classId: input.classId,
+            isActive: true
+        }).session(session);
         if (!academicSession || academicSession.status === "completed" || !academicClass) {
             throw new HttpError(404, "Active academic session and class were not found in this school");
         }

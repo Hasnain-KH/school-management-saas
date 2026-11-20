@@ -24,6 +24,13 @@ export const getAllowedOrigins = () =>
             ? []
             : ["http://localhost:3000", "http://localhost:5173"];
 
+// Explicit, opt-in policy flag. Email delivery and mandatory email verification
+// are independent concerns: configuring a provider (EMAIL_API_KEY/EMAIL_FROM)
+// must never lock existing accounts out. Only when this is the literal "true" do
+// newly created accounts get marked as requiring verification before first login.
+export const isEmailVerificationRequired = () =>
+    process.env.REQUIRE_EMAIL_VERIFICATION === "true";
+
 export const getConfig = () => {
     const nodeEnv = process.env.NODE_ENV;
     if (!["development", "test", "production"].includes(nodeEnv)) {
@@ -61,6 +68,13 @@ export const getConfig = () => {
         throw new Error("RATE_LIMIT_REDIS_URL is required in production");
     }
 
+    const requireEmailVerification = isEmailVerificationRequired();
+    if (requireEmailVerification && (!process.env.EMAIL_API_KEY || !process.env.EMAIL_FROM)) {
+        throw new Error(
+            "REQUIRE_EMAIL_VERIFICATION requires EMAIL_API_KEY and EMAIL_FROM so accounts can complete verification"
+        );
+    }
+
     const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
     if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
         throw new Error("TRUST_PROXY_HOPS must be a non-negative integer");
@@ -82,6 +96,7 @@ export const getConfig = () => {
         rateLimitRedisUrl: process.env.RATE_LIMIT_REDIS_URL,
         allowedOrigins,
         trustProxyHops,
-        nodeEnv
+        nodeEnv,
+        requireEmailVerification
     };
 };

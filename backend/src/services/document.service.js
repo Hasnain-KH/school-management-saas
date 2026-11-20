@@ -3,7 +3,7 @@ import AuditLog from "../models/audit-log.model.js";
 import SchoolDocument from "../models/document.model.js";
 import Student from "../models/student.model.js";
 import User from "../models/user.model.js";
-import { getDocumentStorageProvider } from "./document-storage.provider.js";
+import { getDocumentStorageProvider, getDocumentStorageProviderName } from "./document-storage.provider.js";
 import { getLinkedStudentIds } from "./parent-portal.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
@@ -53,6 +53,7 @@ const parentStudentScope = async (req, schoolId) => {
 
 export const createDocument = async (req, input) => {
     const schoolId = assertTenant(req);
+    const providerName = getDocumentStorageProviderName();
     const storage = getDocumentStorageProvider();
     const buffer = Buffer.from(input.dataBase64, "base64");
     if (!buffer.length) throw new HttpError(400, "The uploaded file is empty");
@@ -81,6 +82,7 @@ export const createDocument = async (req, input) => {
                 contentType: input.contentType,
                 sizeBytes: buffer.length,
                 storageKey,
+                storageProvider: providerName,
                 checksum: createHash("sha256").update(buffer).digest("hex"),
                 uploadedBy: req.user._id
             });
@@ -136,15 +138,18 @@ const findAccessibleDocument = async (req, id) => {
 };
 
 export const getDocumentDownloadUrl = async (req, id) => {
-    const storage = getDocumentStorageProvider();
     const document = await findAccessibleDocument(req, id);
-    const url = await storage.createDownloadUrl({ key: document.storageKey });
+    const storage = getDocumentStorageProvider(document.storageProvider ?? "s3");
+    const url = await storage.createDownloadUrl({
+        key: document.storageKey,
+        contentType: document.contentType
+    });
     return { id: String(document._id), fileName: document.fileName, url };
 };
 
 export const deleteDocument = async (req, id) => {
-    const storage = getDocumentStorageProvider();
     const document = await findAccessibleDocument(req, id);
+    const storage = getDocumentStorageProvider(document.storageProvider ?? "s3");
     await withTransaction(async (session) => {
         document.isActive = false;
         await document.save({ session });

@@ -4,7 +4,7 @@
 
 - **School** — tenant root with unique slug, status, a reference to its configured subscription plan, trial/subscription dates, branches, contact/address details, attendance start time, and bounded attendance grace-period settings.
 - **SubscriptionPlan** — platform-managed pricing, billing interval, optional trial duration, nullable/unlimited resource caps, feature flags, activation status, and a uniquely designated default trial plan.
-- **User** — school-scoped account, normalized email, bcrypt password hash, email verification timestamp, role, and enabled/disabled status. A compound unique index enforces one email per school. Platform super admins have no school and are never created by public routes.
+- **User** — school-scoped account, normalized email, bcrypt password hash, email verification timestamp, a per-account `emailVerificationRequired` marker used by the opt-in mandatory-verification policy, role, and enabled/disabled status. A compound unique index enforces one email per school. Platform super admins have no school and are never created by public routes.
 - **AccountActionToken** — tenant-linked (or platform-account) single-use password-reset/email-verification token digest, user/type, expiration, and consumption timestamp; raw tokens are never persisted or returned by API responses.
 - **FeeReminderDelivery** — tenant/voucher/guardian/date delivery state with retry attempts and a unique daily idempotency key; recipient addresses are resolved from same-school guardian records at delivery time.
 - **RefreshSession** — user/school references, unique refresh/access token IDs, refresh-token digest, expiration, and revocation timestamp. MongoDB TTL removes expired sessions; API checks enforce expiry and revocation even before TTL cleanup.

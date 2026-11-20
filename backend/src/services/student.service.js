@@ -33,19 +33,17 @@ const findStudent = async (schoolId, studentId, session) => {
 };
 
 const findPlacement = async (schoolId, input, session) => {
-    const [academicSession, academicClass, section, school] = await Promise.all([
-        AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session),
-        AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session),
-        Section.findOne({
-            _id: input.sectionId,
-            schoolId,
-            academicSessionId: input.academicSessionId,
-            classId: input.classId,
-            branchId: input.branchId,
-            isActive: true
-        }).session(session),
-        School.findById(schoolId).session(session)
-    ]);
+    const academicSession = await AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session);
+    const academicClass = await AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session);
+    const section = await Section.findOne({
+        _id: input.sectionId,
+        schoolId,
+        academicSessionId: input.academicSessionId,
+        classId: input.classId,
+        branchId: input.branchId,
+        isActive: true
+    }).session(session);
+    const school = await School.findById(schoolId).session(session);
 
     if (!academicSession || !academicClass || !section || !school
         || !school.branches.some((branch) => String(branch._id) === String(input.branchId))) {
@@ -274,10 +272,8 @@ export const transitionStudentPlacement = async (req, studentId, input) => {
             throw new HttpError(409, "Student already has this academic placement");
         }
 
-        const [currentSession, targetPlacement] = await Promise.all([
-            AcademicSession.findOne({ _id: current.academicSessionId, schoolId }).session(session),
-            findPlacement(schoolId, target, session)
-        ]);
+        const currentSession = await AcademicSession.findOne({ _id: current.academicSessionId, schoolId }).session(session);
+        const targetPlacement = await findPlacement(schoolId, target, session);
         if (!currentSession) {
             throw new HttpError(409, "Student's current academic session is missing");
         }
@@ -346,14 +342,12 @@ export const issueLeavingCertificate = async (req, studentId, input = {}) => {
             throw new HttpError(409, "A leaving certificate has already been issued for this student");
         }
 
-        const [leavingEvent, school] = await Promise.all([
-            StudentAcademicHistory.findOne({
-                schoolId,
-                studentId,
-                eventType: student.status
-            }).sort({ effectiveAt: -1, _id: -1 }).session(session),
-            School.findById(schoolId).session(session)
-        ]);
+        const leavingEvent = await StudentAcademicHistory.findOne({
+            schoolId,
+            studentId,
+            eventType: student.status
+        }).sort({ effectiveAt: -1, _id: -1 }).session(session);
+        const school = await School.findById(schoolId).session(session);
         if (!leavingEvent || !leavingEvent.from || !school) {
             throw new HttpError(409, "The student's leaving record is incomplete");
         }
@@ -466,10 +460,8 @@ export const archiveGuardian = async (req, guardianId) => {
 export const linkGuardian = async (req, studentId, guardianId, isPrimary) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [student, guardian] = await Promise.all([
-            Student.findOne({ _id: studentId, schoolId, status: "enrolled" }).session(session),
-            Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session)
-        ]);
+        const student = await Student.findOne({ _id: studentId, schoolId, status: "enrolled" }).session(session);
+        const guardian = await Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session);
         if (!student) throw new HttpError(404, "Enrolled student was not found in this school");
         if (!guardian) throw new HttpError(404, "Guardian was not found in this school");
         if (isPrimary) {
@@ -511,10 +503,8 @@ export const unlinkGuardian = async (req, studentId, guardianId) => {
 export const linkGuardianAccount = async (req, guardianId, parentUserId) => {
     const schoolId = assertTenant(req);
     return withTransaction(async (session) => {
-        const [guardian, parentUser] = await Promise.all([
-            Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session),
-            User.findOne({ _id: parentUserId, schoolId, role: "parent", status: "active" }).session(session)
-        ]);
+        const guardian = await Guardian.findOne({ _id: guardianId, schoolId, isActive: true }).session(session);
+        const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: "parent", status: "active" }).session(session);
         if (!guardian) throw new HttpError(404, "Guardian was not found in this school");
         if (!parentUser) {
             throw new HttpError(404, "An active parent account was not found in this school");
