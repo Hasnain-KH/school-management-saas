@@ -109,9 +109,21 @@ export default function SchoolLogoManager({ school, onUpdated }) {
         <div className="logo-preview-wrap">
           <span className="logo-preview">
             {pending ? (
-              <img src={pending.url} alt="Selected logo preview" />
+              <SchoolLogo
+                src={pending.url}
+                size={44}
+                label="Selected logo preview"
+                fallback={<ImagePlus size={40} aria-hidden="true" />}
+                decorative={false}
+              />
             ) : (
-              <SchoolLogo school={school} size={44} fallback={school?.name?.slice(0, 1) || "S"} />
+              <SchoolLogo
+                school={school}
+                size={44}
+                label="Current school logo"
+                fallback={school?.name?.slice(0, 1) || "S"}
+                decorative={false}
+              />
             )}
           </span>
           <div className="logo-preview-meta">

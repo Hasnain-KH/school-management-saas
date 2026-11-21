@@ -55,8 +55,10 @@ test("resend payload targets the verification endpoint and omits a blank workspa
   });
 });
 
-test("new password validation enforces length and confirmation", () => {
+test("new password validation enforces length, byte size, and confirmation", () => {
   assert.equal(validateNewPassword("short", "short"), "Password must be at least 12 characters.");
+  assert.equal(validateNewPassword("a".repeat(73), "a".repeat(73)), "Password must not exceed 72 characters.");
+  assert.equal(validateNewPassword("é".repeat(40), "é".repeat(40)), "Password must not exceed 72 UTF-8 bytes.");
   assert.equal(validateNewPassword("a-long-enough-password", "different-password-x"), "The passwords do not match.");
   assert.equal(validateNewPassword("a-long-enough-password", "a-long-enough-password"), null);
 });

@@ -17,6 +17,39 @@ const baseSchool = (logo = null) => ({
   logo
 });
 
+// Generates a real PNG with the requested dimensions in the browser, so the
+// upload preview can be checked against square, landscape and portrait sources.
+async function createPng(page, width, height) {
+  const dataUrl = await page.evaluate(({ width, height }) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#2f5d8c";
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(
+      Math.floor(width / 4),
+      Math.floor(height / 4),
+      Math.max(1, Math.floor(width / 2)),
+      Math.max(1, Math.floor(height / 2))
+    );
+    return canvas.toDataURL("image/png");
+  }, { width, height });
+  return Buffer.from(dataUrl.split(",")[1], "base64");
+}
+
+const frameMetrics = (locator) => locator.evaluate((element) => {
+  const style = window.getComputedStyle(element);
+  const rect = element.getBoundingClientRect();
+  return {
+    width: rect.width,
+    height: rect.height,
+    borderRadius: style.borderRadius,
+    aspectRatio: style.aspectRatio
+  };
+});
+
 // Mirrors the real API contract: /me/logo is a same-origin byte stream and the
 // client never sends a schoolId. All tenant identity comes from the session.
 async function signIn(page, { role = "school_admin", logo = null, brokenLogo = false } = {}) {
@@ -214,4 +247,109 @@ test("logo controls remain usable at mobile width", async ({ page }) => {
   const box = await page.getByRole("button", { name: /Upload school logo/ }).boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
+});
+
+test("the current school logo appears in both header and sidebar profile locations", async ({ page }) => {
+  const state = await signIn(page, {
+    logo: { version: 7, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "shared.png" }
+  });
+
+  await expect(page.locator(".topbar-avatar .school-logo--image img")).toHaveAttribute("src", /schools\/me\/logo\?v=7/);
+  await expect(page.locator(".profile-avatar .school-logo--image img")).toHaveAttribute("src", /schools\/me\/logo\?v=7/);
+  expect(state.calls.filter((call) => call.path === "/schools/me/logo" && call.method === "GET").length).toBeGreaterThan(0);
+});
+
+test("all displayed logo frames are circular 1:1 containers", async ({ page }) => {
+  await signIn(page, {
+    logo: { version: 5, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "round.png" }
+  });
+
+  for (const selector of [
+    ".brand-mark",
+    ".school-avatar",
+    ".topbar-avatar .school-logo",
+    ".profile-avatar .school-logo"
+  ]) {
+    const metrics = await frameMetrics(page.locator(selector));
+    expect(Math.abs(metrics.width - metrics.height)).toBeLessThanOrEqual(1);
+    expect(metrics.borderRadius).toBe("50%");
+  }
+
+  for (const selector of [".brand-mark img", ".school-avatar img", ".topbar-avatar img", ".profile-avatar img"]) {
+    await expect(page.locator(selector)).toHaveCSS("object-fit", "contain");
+  }
+});
+
+test("header and sidebar keep the initials fallback when no logo exists", async ({ page }) => {
+  await signIn(page);
+
+  await expect(page.locator(".topbar-avatar .school-logo")).toHaveText("T");
+  await expect(page.locator(".profile-avatar .school-logo")).toHaveText("T");
+  await expect(page.locator(".topbar-avatar img")).toHaveCount(0);
+  await expect(page.locator(".profile-avatar img")).toHaveCount(0);
+});
+
+test("header and sidebar fall back to initials when the logo request fails", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await signIn(page, {
+    brokenLogo: true,
+    logo: { version: 2, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "broken.png" }
+  });
+
+  await expect(page.locator(".topbar-avatar .school-logo--image")).toHaveCount(0);
+  await expect(page.locator(".profile-avatar .school-logo--image")).toHaveCount(0);
+  await expect(page.locator(".topbar-avatar .school-logo")).toHaveText("T");
+  await expect(page.locator(".profile-avatar .school-logo")).toHaveText("T");
+  expect(errors).toEqual([]);
+});
+
+test("upload preview fits square, landscape and portrait images without distortion", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/school");
+
+  for (const [width, height] of [[120, 120], [240, 120], [120, 240]]) {
+    const buffer = await createPng(page, width, height);
+    await page.getByLabel("Choose a logo image").setInputFiles({
+      name: `logo-${width}x${height}.png`,
+      mimeType: "image/png",
+      buffer
+    });
+
+    const preview = page.getByRole("img", { name: "Selected logo preview" });
+    await expect.poll(() => preview.evaluate((image) => image.naturalWidth)).toBe(width);
+    await expect.poll(() => preview.evaluate((image) => image.naturalHeight)).toBe(height);
+    await expect(preview).toHaveCSS("object-fit", "contain");
+
+    const imageBox = await preview.boundingBox();
+    const frameBox = await page.locator(".logo-preview").boundingBox();
+    expect(Math.abs(imageBox.width - imageBox.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(frameBox.width - frameBox.height)).toBeLessThanOrEqual(1);
+    expect(await page.locator(".logo-preview").evaluate((element) => getComputedStyle(element).borderRadius)).toBe("50%");
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(preview).toHaveCount(0);
+  }
+});
+
+test("circular logo presentation stays inside the mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page, {
+    logo: { version: 4, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "mobile.png" }
+  });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(page.locator(".sidebar")).toHaveClass(/sidebar-open/);
+
+  for (const selector of [".brand-mark", ".school-avatar", ".topbar-avatar", ".profile-avatar"]) {
+    await expect(page.locator(selector)).toBeInViewport();
+    const box = await page.locator(selector).boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(32);
+    expect(box.width).toBeLessThanOrEqual(44);
+    expect(Math.abs(box.width - box.height)).toBeLessThanOrEqual(1);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+
+  const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  expect(fits).toBe(true);
 });

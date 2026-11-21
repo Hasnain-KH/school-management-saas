@@ -59,6 +59,7 @@ export default function PortalShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const groups = roleGroups[user?.role] || [];
+  const userInitial = user?.name?.slice(0, 1)?.toUpperCase() || "U";
 
   const currentLabel = useMemo(() => {
     const path = location.pathname.replace(/^\//, "");
@@ -109,7 +110,7 @@ export default function PortalShell() {
       </nav>
       <div className="sidebar-footer">
         <div className="help-card"><div className="help-dot" /><strong>Workspace status</strong><span>{school?.status || "Platform access"}</span></div>
-        <div className="profile-block"><span className="profile-avatar" aria-hidden="true">{user?.name?.slice(0, 1) || "U"}</span><span className="profile-copy"><strong>{user?.name}</strong><small>{roleName(user?.role)}</small></span></div>
+        <div className="profile-block"><span className="profile-avatar" aria-hidden="true"><SchoolLogo size={16} fallback={userInitial} /></span><span className="profile-copy"><strong>{user?.name}</strong><small>{roleName(user?.role)}</small></span></div>
         <button className="profile-signout" onClick={logout}><LogOut size={16} aria-hidden="true" /><span>Sign out</span></button>
       </div>
     </aside>
@@ -122,7 +123,7 @@ export default function PortalShell() {
           {user?.role !== "platform_super_admin" && <NotificationBell />}
           <span className="status-pill">{school?.status || roleName(user?.role)}</span>
           <div className="account" ref={accountRef}>
-            <button className="topbar-avatar" onClick={() => setAccountOpen((value) => !value)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu">{user?.name?.slice(0, 1) || "U"}</button>
+            <button className="topbar-avatar" onClick={() => setAccountOpen((value) => !value)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><SchoolLogo size={16} fallback={userInitial} /></button>
             {accountOpen && <div className="account-menu" role="menu">
               <header><strong>{user?.name}</strong><small>{roleName(user?.role)}{school?.name ? ` · ${school.name}` : ""}</small></header>
               {accountLinks(user?.role).map(([label, to, Icon]) => <button key={to} className="menu-item" role="menuitem" onClick={() => navigate(to)}><Icon size={16} aria-hidden="true" />{label}</button>)}

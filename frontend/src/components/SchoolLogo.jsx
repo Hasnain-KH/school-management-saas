@@ -9,20 +9,38 @@ export const schoolLogoUrl = (school) => school?.logo?.version
   ? `${API_BASE}/schools/me/logo?v=${encodeURIComponent(school.logo.version)}`
   : "";
 
-export default function SchoolLogo({ className = "", size = 19, school: schoolProp, label, fallback, decorative = true }) {
+// Shared, circular logo renderer. `src` is only used by the upload preview so
+// the original object URL can be shown without re-encoding or uploading it.
+export default function SchoolLogo({
+  className = "",
+  size = 19,
+  school: schoolProp,
+  src,
+  label,
+  fallback,
+  decorative = true,
+  circle = true
+}) {
   const { school: authSchool } = useAuth();
   const school = schoolProp ?? authSchool;
   const [failed, setFailed] = useState(false);
-  const url = schoolLogoUrl(school);
+  const url = src || schoolLogoUrl(school);
 
   useEffect(() => { setFailed(false); }, [url]);
 
+  const classes = [
+    "school-logo",
+    circle && "school-logo--circle",
+    !failed && url && "school-logo--image",
+    className
+  ].filter(Boolean).join(" ");
+
   if (!url || failed) {
-    return <span className={`school-logo ${className}`.trim()} aria-hidden={decorative || undefined} title={decorative ? undefined : label}>
+    return <span className={classes} aria-hidden={decorative || undefined} title={decorative ? undefined : label}>
       {fallback ?? <School size={size} aria-hidden="true" />}
     </span>;
   }
-  return <span className={`school-logo school-logo--image ${className}`.trim()} aria-hidden={decorative || undefined}>
+  return <span className={classes} aria-hidden={decorative || undefined}>
     <img src={url} alt={decorative ? "" : label || `${school?.name || "School"} logo`} onError={() => setFailed(true)} />
   </span>;
 }

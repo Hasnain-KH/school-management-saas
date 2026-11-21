@@ -314,9 +314,11 @@ svg { flex: 0 0 auto; }
   font-size: 19px; font-weight: var(--fw-bold); letter-spacing: -0.7px; white-space: nowrap;
 }
 .brand-mark {
-  display: grid; width: 36px; height: 36px; place-items: center; flex: 0 0 auto;
+  --logo-frame-bg: var(--sidebar-accent);
+  --logo-frame-border: var(--sidebar-line-strong);
+  display: grid; width: 40px; height: 40px; place-items: center; flex: 0 0 auto;
   color: var(--sidebar-accent-ink); background: var(--sidebar-accent);
-  border-radius: var(--r-md); box-shadow: var(--sh-xs);
+  border-radius: 50%; box-shadow: var(--sh-xs);
 }
 .brand-light { color: var(--sidebar-muted); font-weight: var(--fw-medium); }
 .school-switcher {
@@ -327,16 +329,29 @@ svg { flex: 0 0 auto; }
 }
 .school-switcher:hover { border-color: var(--sidebar-line-strong); box-shadow: var(--sh-xs); }
 .school-avatar, .profile-avatar, .topbar-avatar { display: grid; flex: 0 0 auto; place-items: center; font-weight: var(--fw-bold); color: var(--brand-ink); background: var(--brand-soft); }
-.school-avatar { width: 36px; height: 36px; border-radius: var(--r-md); font-size: var(--fs-md); }
+.school-avatar {
+  --logo-frame-bg: var(--sidebar-surface);
+  --logo-frame-border: var(--sidebar-line);
+  width: 42px; height: 42px; border-radius: 50%; font-size: var(--fs-md);
+}
 
-/* School branding: a shared renderer shows the tenant logo (when present) or a
-   graceful fallback. The versioned URL busts the cache immediately on update. */
-.school-logo { display: grid; place-items: center; overflow: hidden; }
-.school-logo > svg { max-width: 70%; max-height: 70%; }
-.school-logo--image { background: #fff; color: var(--brand); }
-.school-logo--image.brand-mark { box-shadow: 0 0 0 1px var(--sidebar-line-strong), var(--sh-xs); }
-.school-logo--image.school-avatar { box-shadow: 0 0 0 1px var(--sidebar-line); }
-.school-logo img { width: 100%; height: 100%; object-fit: contain; padding: var(--space-1); }
+/* Circular school branding: one shared, 1:1 frame for every tenant logo.
+   object-fit: contain preserves the uploaded aspect ratio inside the frame;
+   the stored asset is never re-encoded, cropped or overwritten for display. */
+.school-logo { position: relative; display: grid; place-items: center; flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; }
+.school-logo--circle {
+  border: 1px solid var(--logo-frame-border, var(--line));
+  border-radius: 50%;
+  background: var(--logo-frame-bg, var(--surface));
+  box-shadow: var(--sh-xs);
+}
+.school-logo > svg { width: 62%; height: 62%; max-width: 62%; max-height: 62%; }
+.school-logo--image { color: var(--brand); }
+.school-logo img {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%; box-sizing: border-box;
+  object-fit: contain; padding: var(--logo-frame-padding, 3px); border-radius: inherit;
+}
+.school-logo--circle.school-avatar { box-shadow: none; }
 
 .school-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .school-label strong { overflow: hidden; color: var(--sidebar-ink); font-size: var(--fs-sm); font-weight: var(--fw-bold); text-overflow: ellipsis; white-space: nowrap; }
@@ -373,7 +388,12 @@ svg { flex: 0 0 auto; }
 .help-dot, .status-pill > span, .live-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; }
 .help-dot { grid-row: span 2; align-self: center; box-shadow: 0 0 0 3px var(--sidebar-line); }
 .profile-block { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-1) var(--space-1); }
-.profile-avatar { width: 34px; height: 34px; color: var(--sidebar-accent-ink); background: var(--sidebar-accent); border-radius: var(--r-pill); font-size: var(--fs-xs); }
+.profile-avatar {
+  width: 42px; height: 42px; padding: 0; overflow: hidden;
+  color: var(--brand-ink); background: var(--surface-2);
+  border: 1px solid var(--sidebar-line-strong); border-radius: 50%; font-size: var(--fs-sm);
+}
+.profile-avatar .school-logo { --logo-frame-border: transparent; width: 100%; height: 100%; border-color: transparent; box-shadow: none; }
 .profile-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
 .profile-copy strong { overflow: hidden; color: var(--sidebar-ink); font-size: var(--fs-sm); font-weight: var(--fw-bold); text-overflow: ellipsis; white-space: nowrap; }
 .profile-copy small { color: var(--sidebar-muted); font-size: var(--fs-2xs); }
@@ -438,11 +458,13 @@ svg { flex: 0 0 auto; }
 .topbar-actions { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
 .status-pill { display: flex; align-items: center; gap: 7px; padding: 6px 11px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-transform: capitalize; }
 .topbar-avatar {
-  width: 34px; height: 34px; color: var(--brand-ink); background: var(--brand-soft);
-  border: 1px solid var(--line-strong); border-radius: var(--r-pill); font-size: var(--fs-sm); cursor: pointer;
+  width: 38px; height: 38px; padding: 0; overflow: hidden;
+  color: var(--brand-ink); background: var(--surface-2);
+  border: 1px solid var(--line-strong); border-radius: 50%; font-size: var(--fs-sm); cursor: pointer;
   transition: background var(--t-fast), border-color var(--t-fast);
 }
-.topbar-avatar:hover { background: var(--brand-soft-2); border-color: var(--brand-line); }
+.topbar-avatar .school-logo { --logo-frame-border: transparent; width: 100%; height: 100%; border-color: transparent; box-shadow: none; }
+.topbar-avatar:hover { background: var(--surface-3); border-color: var(--brand-line); }
 
 /* account dropdown in the top bar */
 .account { position: relative; }
@@ -947,7 +969,13 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 
 /* --------------------------------------------------- module-specific bits */
 .profile-card { max-width: 640px; padding: 26px; text-align: center; }
-.profile-logo { display: grid; width: 58px; height: 58px; place-items: center; margin: 0 auto; color: var(--brand); background: var(--brand-soft); border-radius: var(--r-lg); font-size: var(--fs-2xl); font-weight: var(--fw-bold); }
+.profile-logo {
+  --logo-frame-bg: var(--surface-2);
+  --logo-frame-border: var(--line-strong);
+  display: grid; width: 104px; height: 104px; place-items: center; margin: 0 auto;
+  color: var(--brand); background: var(--brand-soft); border-radius: 50%;
+  font-size: var(--fs-2xl); font-weight: var(--fw-bold);
+}
 .profile-card h2 { margin: 14px 0 4px; color: var(--ink); font-size: var(--fs-xl); }
 .profile-card > p { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
 .profile-details { display: grid; grid-template-columns: 1fr 1fr; margin-top: 20px; text-align: left; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
@@ -965,10 +993,16 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 .logo-manager > .muted { margin: 6px 0 18px; color: var(--muted); font-size: var(--fs-sm); }
 .logo-manager-body { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .logo-preview-wrap { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.logo-preview { display: grid; flex: 0 0 auto; width: 76px; height: 76px; place-items: center; overflow: hidden; color: var(--brand); background: var(--brand-soft); border: 1px solid var(--line); border-radius: var(--r-lg); font-size: var(--fs-2xl); font-weight: var(--fw-bold); }
-.logo-preview img { width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+.logo-preview {
+  --logo-frame-bg: var(--surface);
+  --logo-frame-border: var(--line-strong);
+  --logo-frame-padding: 7px;
+  display: grid; flex: 0 0 auto; width: 104px; height: 104px; place-items: center;
+  overflow: hidden; color: var(--brand); background: var(--brand-soft);
+  border: 1px solid var(--line); border-radius: 50%; font-size: var(--fs-2xl); font-weight: var(--fw-bold);
+}
 .logo-preview .school-logo { width: 100%; height: 100%; }
-.logo-preview .school-logo--image { background: transparent; }
+.logo-preview .school-logo > svg { width: 48%; height: 48%; max-width: 48%; max-height: 48%; }
 .logo-preview-meta { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .logo-preview-meta strong { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-bold); }
 .logo-preview-meta span { overflow: hidden; color: var(--faint); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
@@ -1108,6 +1142,10 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 }
 @media (max-width: 760px) {
   .topbar { height: 58px; gap: var(--space-2); padding: 0 16px; }
+  .brand-mark { width: 36px; height: 36px; }
+  .school-avatar, .profile-avatar { width: 40px; height: 40px; }
+  .topbar-avatar { width: 36px; height: 36px; }
+  .profile-logo, .logo-preview { width: 96px; height: 96px; }
   .status-pill { display: none; }
   .page-frame { padding: 22px 16px 44px; }
   .page-intro { align-items: flex-start; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-5); }
@@ -1153,6 +1191,9 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 }
 @media (max-width: 420px) {
   .page-frame { padding-right: 12px; padding-left: 12px; }
+  .brand-mark { width: 34px; height: 34px; }
+  .school-avatar, .profile-avatar, .topbar-avatar { width: 36px; height: 36px; }
+  .profile-logo, .logo-preview { width: 92px; height: 92px; }
   .breadcrumbs { gap: var(--space-1); font-size: var(--fs-xs); }
   .breadcrumbs > span:first-child { max-width: 12ch; }
   .intro-action { flex-direction: column; }

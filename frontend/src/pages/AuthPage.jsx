@@ -72,7 +72,15 @@ export default function AuthPage({ mode }) {
         return;
       }
       if (isReset && reason instanceof ApiError && reason.status === 400) {
-        setError("This reset link is invalid, expired, or has already been used. Request a new password reset email.");
+        // The API returns 400 for both token rejection and request validation.
+        // Keep the reset-link message for token errors only so a password-policy
+        // failure is not misreported as a bad link.
+        const passwordIssue = reason.errors?.find(({ path }) =>
+          (Array.isArray(path) ? path : [path]).includes("password")
+        );
+        setError(passwordIssue
+          ? "Choose a password that meets the requirements and try again."
+          : "This reset link is invalid, expired, or has already been used. Request a new password reset email.");
         return;
       }
       setError(reason instanceof ApiError ? reason.message : "The service could not be reached. Check the API connection and try again.");

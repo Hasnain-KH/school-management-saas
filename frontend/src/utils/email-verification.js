@@ -67,10 +67,17 @@ export function isVerificationRequiredError(reason) {
     && reason.message.toLowerCase().includes("verification");
 }
 
-// Client-side guard mirroring the backend password policy (min 12 chars).
+// Client-side guard mirroring the backend password policy (min 12 chars,
+// max 72 chars and 72 UTF-8 bytes).
 export function validateNewPassword(password, confirmation) {
   if (typeof password !== "string" || password.length < 12) {
     return "Password must be at least 12 characters.";
+  }
+  if (password.length > 72) {
+    return "Password must not exceed 72 characters.";
+  }
+  if (new TextEncoder().encode(password).length > 72) {
+    return "Password must not exceed 72 UTF-8 bytes.";
   }
   if (password !== confirmation) {
     return "The passwords do not match.";
