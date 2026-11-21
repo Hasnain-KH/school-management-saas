@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Bell } from "lucide-react";
+import { Bell } from "./ui/icon/icons.jsx";
 import { get } from "../api/client.js";
 
 // Lightweight unread indicator for the top bar. Refreshes on mount, when the
@@ -30,6 +30,6 @@ export default function NotificationBell() {
 
   return <Link to="/notifications" className="icon-button notification-bell" aria-label={unread ? `${unread} unread notifications` : "Notifications"}>
     <Bell size={19} />
-    {unread > 0 && <span className="notification-badge" aria-hidden="true">{unread > 99 ? "99+" : unread}</span>}
+    {unread > 0 && <span className="notification-badge motion-pop" aria-hidden="true">{unread > 99 ? "99+" : unread}</span>}
   </Link>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "./ui/icon/icons.jsx";
 
 /**
  * Accessible row action menu. The panel is positioned with fixed coordinates so

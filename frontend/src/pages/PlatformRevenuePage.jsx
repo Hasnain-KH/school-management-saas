@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { CircleDollarSign, Plus } from "lucide-react";
+import { CircleDollarSign, Plus } from "../components/ui/icon/icons.jsx";
 import { get, post, queryString } from "../api/client.js";
 import Modal from "../components/Modal.jsx";
+import ModuleHeader from "../components/ModuleHeader.jsx";
 import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
@@ -121,14 +122,7 @@ export default function PlatformRevenuePage() {
   };
 
   return <>
-    <div className="page-intro">
-      <div>
-        <div className="page-kicker">PLATFORM ADMINISTRATION</div>
-        <h1>Revenue</h1>
-        <p>Recorded subscription payments and platform revenue.</p>
-      </div>
-      <div className="intro-action"><button className="button button-primary" onClick={() => setRecording(true)}><Plus size={16} />Record payment</button></div>
-    </div>
+    <ModuleHeader kicker="PLATFORM ADMINISTRATION" title="Revenue" description="Recorded subscription payments and platform revenue." icon={CircleDollarSign} action={<button className="button button-primary" onClick={() => setRecording(true)}><Plus size={16} />Record payment</button>} />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <div className="tabs platform-tabs" role="group" aria-label="Revenue view">
       <button type="button" aria-pressed={tab === "revenue"} className={tab === "revenue" ? "tab active-tab" : "tab"} onClick={() => setTab("revenue")}>Summary</button>

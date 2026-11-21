@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { School } from "lucide-react";
+import { School } from "./ui/icon/icons.jsx";
 import { API_BASE } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 

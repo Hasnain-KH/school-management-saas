@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, ArrowRight, CheckCircle2, LoaderCircle, Mail, School } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, LoaderCircle, Mail, School } from "../components/ui/icon/icons.jsx";
 import { post } from "../api/client.js";
 import {
   VERIFICATION_OUTCOMES,

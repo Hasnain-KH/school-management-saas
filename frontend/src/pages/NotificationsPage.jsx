@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { BellRing, CheckCheck } from "lucide-react";
+import { BellRing, CheckCheck } from "../components/ui/icon/icons.jsx";
 import { get, post, queryString } from "../api/client.js";
+import ModuleHeader from "../components/ModuleHeader.jsx";
 import { EmptyState, ErrorState, LoadingState, Notice, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
@@ -77,16 +78,7 @@ export default function NotificationsPage() {
   const unreadOnPage = items.filter((item) => !item.read).length;
 
   return <>
-    <div className="page-intro">
-      <div>
-        <div className="page-kicker">SCHOOLFLOW WORKSPACE</div>
-        <h1>Notifications</h1>
-        <p>School updates, published results, and reminders addressed to you.</p>
-      </div>
-      <div className="intro-action">
-        <button className="button button-outline" disabled={busy || !unreadOnPage} onClick={markAllRead}><CheckCheck size={16} />Mark all read</button>
-      </div>
-    </div>
+    <ModuleHeader title="Notifications" description="School updates, published results, and reminders addressed to you." icon={BellRing} action={<button className="button button-outline" disabled={busy || !unreadOnPage} onClick={markAllRead}><CheckCheck size={16} />Mark all read</button>} />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">

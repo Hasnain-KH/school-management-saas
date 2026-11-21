@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, LoaderCircle, Trash2 } from "lucide-react";
+import { ImagePlus, LoaderCircle, Trash2 } from "../components/ui/icon/icons.jsx";
 import { del, post } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
@@ -101,7 +101,7 @@ export default function SchoolLogoManager({ school, onUpdated }) {
   };
 
   return (
-    <section className="content-card logo-manager" aria-labelledby="logo-manager-heading">
+    <section className="content-card logo-manager module-subpanel" aria-labelledby="logo-manager-heading">
       <h2 id="logo-manager-heading">School logo</h2>
       <p className="muted">Upload your school&apos;s logo to display it in the sidebar and header of every workspace.</p>
 

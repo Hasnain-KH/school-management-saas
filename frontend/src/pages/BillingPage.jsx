@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { Receipt } from "../components/ui/icon/icons.jsx";
 import { get, queryString } from "../api/client.js";
+import ModuleHeader from "../components/ModuleHeader.jsx";
 import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
@@ -47,13 +49,7 @@ export default function BillingPage() {
   useEffect(() => { load(); }, [load]);
 
   return <>
-    <div className="page-intro">
-      <div>
-        <div className="page-kicker">SCHOOLFLOW WORKSPACE</div>
-        <h1>Billing history</h1>
-        <p>Subscription payments recorded for your school.</p>
-      </div>
-    </div>
+    <ModuleHeader title="Billing history" description="Subscription payments recorded for your school." icon={Receipt} />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">

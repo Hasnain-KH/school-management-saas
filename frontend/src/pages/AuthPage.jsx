@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, BookOpenCheck, Check, Mail, School } from "lucide-react";
+import { ArrowRight, BookOpenCheck, Check, Mail, School } from "../components/ui/icon/icons.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { ApiError, post } from "../api/client.js";
 import {

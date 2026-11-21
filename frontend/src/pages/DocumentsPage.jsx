@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, FileText, Plus, Trash2 } from "lucide-react";
+import { Download, FileText, Plus, Trash2 } from "../components/ui/icon/icons.jsx";
 import { del, get, post, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import Modal from "../components/Modal.jsx";
+import ModuleHeader from "../components/ModuleHeader.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
 
@@ -167,14 +168,7 @@ export default function DocumentsPage() {
   };
 
   return <>
-    <div className="page-intro">
-      <div>
-        <div className="page-kicker">SCHOOLFLOW WORKSPACE</div>
-        <h1>Documents</h1>
-        <p>{canManage ? "Store and share student, staff, and school records securely." : "Documents your school has shared with you."}</p>
-      </div>
-      {canManage && <div className="intro-action"><button className="button button-primary" onClick={() => setUploading(true)}><Plus size={16} />Upload document</button></div>}
-    </div>
+    <ModuleHeader title="Documents" description={canManage ? "Store and share student, staff, and school records securely." : "Documents your school has shared with you."} icon={FileText} action={canManage && <button className="button button-primary" onClick={() => setUploading(true)}><Plus size={16} />Upload document</button>} />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">

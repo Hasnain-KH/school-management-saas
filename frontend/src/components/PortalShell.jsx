@@ -4,7 +4,7 @@ import {
   Activity, Archive, Bell, BellRing, BookOpen, CalendarDays, ChartNoAxesCombined,
   CircleDollarSign, FileText, GraduationCap, LayoutDashboard, LibraryBig, LogOut, Menu, PanelLeftClose,
   Receipt, Boxes, Settings2, Shield, Users, X
-} from "lucide-react";
+} from "./ui/icon/icons.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import SchoolLogo from "./SchoolLogo.jsx";
@@ -110,7 +110,7 @@ export default function PortalShell() {
       <div className="sidebar-footer">
         <div className="help-card"><div className="help-dot" /><strong>Workspace status</strong><span>{school?.status || "Platform access"}</span></div>
         <div className="profile-block"><span className="profile-avatar" aria-hidden="true">{user?.name?.slice(0, 1) || "U"}</span><span className="profile-copy"><strong>{user?.name}</strong><small>{roleName(user?.role)}</small></span></div>
-        <button className="profile-signout" onClick={logout}>Sign out</button>
+        <button className="profile-signout" onClick={logout}><LogOut size={16} aria-hidden="true" /><span>Sign out</span></button>
       </div>
     </aside>
     {menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}

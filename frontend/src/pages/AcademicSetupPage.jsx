@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { BookOpen, Pencil, Plus, Trash2 } from "../components/ui/icon/icons.jsx";
 import { del, get, patch, post, queryString } from "../api/client.js";
 import Modal from "../components/Modal.jsx";
+import ModuleHeader from "../components/ModuleHeader.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import RowMenu from "../components/RowMenu.jsx";
 import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
@@ -171,10 +172,12 @@ export default function AcademicSetupPage() {
   };
 
   return <>
-    <header className="page-intro">
-      <div><div className="page-kicker">SCHOOLFLOW WORKSPACE</div><h1>Academic setup</h1><p>Manage sessions, classes, sections, subjects, and timetables.</p></div>
-      <div className="intro-action"><button className="button button-primary" onClick={() => { setEditing(null); setDialog(true); }}><Plus size={16} />Add {tabLabel(tab).replace(/s$/, "").toLowerCase()}</button></div>
-    </header>
+    <ModuleHeader
+      title="Academic setup"
+      description="Manage sessions, classes, sections, subjects, and timetables."
+      icon={BookOpen}
+      action={<button className="button button-primary" onClick={() => { setEditing(null); setDialog(true); }}><Plus size={16} />Add {tabLabel(tab).replace(/s$/, "").toLowerCase()}</button>}
+    />
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="tabs" role="tablist" aria-label="Academic setup categories">{TABS.map(([key, label]) => <button key={key} type="button" role="tab" id={`academic-tab-${key}`} aria-controls="academic-tab-panel" data-academic-tab={key} aria-selected={tab === key} tabIndex={tab === key ? 0 : -1} className={tab === key ? "tab active-tab" : "tab"} onKeyDown={onTabKeyDown} onClick={() => { setTab(key); setEditing(null); setDialog(false); }}>{label}</button>)}</div>

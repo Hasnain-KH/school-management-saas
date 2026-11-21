@@ -1,5 +1,5 @@
 import { Component } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle } from "./ui/icon/icons.jsx";
 
 // Catches rendering errors anywhere below so a single broken screen never
 // blanks the whole application for the user.
