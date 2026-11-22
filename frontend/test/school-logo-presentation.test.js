@@ -8,31 +8,55 @@ const shell = read("../src/components/PortalShell.jsx");
 const manager = read("../src/pages/SchoolLogoManager.jsx");
 const renderer = read("../src/components/SchoolLogo.jsx");
 
+const rule = (selector) => css.match(new RegExp(`\\${selector}\\s*\\{[^}]*\\}`))?.[0] ?? "";
+
 test("shared logo frame is circular, square and preserves image aspect ratio", () => {
-  assert.match(css, /\.school-logo\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/);
-  assert.match(css, /\.school-logo--circle\s*\{[^}]*border-radius:\s*50%/);
-  assert.match(css, /\.school-logo\s+img\s*\{[^}]*object-fit:\s*contain/);
-  assert.match(css, /\.logo-preview\s*\{[^}]*border-radius:\s*50%/);
+  assert.match(rule(".school-logo"), /aspect-ratio:\s*1\s*\/\s*1/);
+  assert.match(rule(".school-logo--circle"), /border-radius:\s*50%/);
+  assert.match(rule(".school-logo img"), /object-fit:\s*contain/);
+  assert.match(rule(".logo-preview"), /border-radius:\s*50%/);
   assert.doesNotMatch(css, /object-fit:\s*cover/);
 });
 
-test("image is fitted to the circle's inscribed square with balanced padding", () => {
-  const imageRule = css.match(/\.school-logo img\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(imageRule, /top:\s*var\(--logo-fit-inset,\s*16%\)/);
-  assert.match(imageRule, /left:\s*var\(--logo-fit-inset,\s*16%\)/);
-  assert.match(imageRule, /width:\s*calc\(100%\s*-\s*2\s*\*\s*var\(--logo-fit-inset,\s*16%\)\)/);
-  assert.match(imageRule, /height:\s*calc\(100%\s*-\s*2\s*\*\s*var\(--logo-fit-inset,\s*16%\)\)/);
-  assert.match(imageRule, /padding:\s*var\(--logo-frame-padding,\s*1px\)/);
-  assert.match(imageRule, /box-sizing:\s*border-box/);
+test("image uses the circle's inscribed square and a centered content fit", () => {
+  const frameRule = rule(".school-logo");
+  const imageRule = rule(".school-logo img");
+  assert.match(frameRule, /--logo-fit-inset:\s*14\.645%/);
+  assert.match(frameRule, /--logo-scale:\s*1/);
+  assert.match(frameRule, /--logo-shift-x:\s*0%/);
+  assert.match(frameRule, /--logo-shift-y:\s*0%/);
+  assert.match(imageRule, /top:\s*var\(--logo-fit-inset\)/);
+  assert.match(imageRule, /left:\s*var\(--logo-fit-inset\)/);
+  assert.match(imageRule, /width:\s*calc\(100%\s*-\s*2\s*\*\s*var\(--logo-fit-inset\)\)/);
+  assert.match(imageRule, /height:\s*calc\(100%\s*-\s*2\s*\*\s*var\(--logo-fit-inset\)\)/);
+  assert.match(imageRule, /object-position:\s*center/);
+  assert.match(imageRule, /transform-origin:\s*center/);
+  assert.match(imageRule, /transform:\s*translate\(var\(--logo-shift-x\),\s*var\(--logo-shift-y\)\)\s*scale\(var\(--logo-scale\)\)/);
   assert.doesNotMatch(imageRule, /inset:\s*0/);
+  assert.doesNotMatch(imageRule, /padding:/);
   assert.doesNotMatch(imageRule, /border-radius:\s*inherit/);
   assert.doesNotMatch(css, /clip-path/);
 });
 
-test("logo previews use the same restrained padding as compact frames", () => {
-  const previewRule = css.match(/\.logo-preview\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(previewRule, /--logo-frame-padding:\s*2px/);
-  assert.doesNotMatch(previewRule, /--logo-frame-padding:\s*7px/);
+test("logo frames stay neutral and free of decorative effects", () => {
+  assert.match(rule(".school-logo--circle"), /box-shadow:\s*none/);
+  assert.match(rule(".brand-mark"), /box-shadow:\s*none/);
+  for (const selector of [".school-logo", ".school-logo--circle", ".school-logo img", ".logo-preview"]) {
+    assert.doesNotMatch(rule(selector), /gradient/);
+    assert.doesNotMatch(rule(selector), /animation/);
+  }
+});
+
+test("renderer measures alpha bounds and applies a uniform content transform", () => {
+  assert.match(renderer, /ARTWORK_FILL\s*=\s*0\.96/);
+  assert.match(renderer, /getImageData/);
+  assert.match(renderer, /naturalWidth\s*\|\|\s*source\.width/);
+  assert.match(renderer, /createImageBitmap/);
+  assert.match(renderer, /onLoad=\{handleLoad\}/);
+  assert.match(renderer, /"--logo-scale":\s*fit\.scale/);
+  assert.match(renderer, /"--logo-shift-x"/);
+  assert.match(renderer, /"--logo-shift-y"/);
+  assert.doesNotMatch(renderer, /toDataURL/);
 });
 
 test("header and sidebar profile locations use the shared renderer", () => {
@@ -60,6 +84,6 @@ test("upload preview uses the original object URL and keeps upload/remove contra
 
 test("renderer keeps versioned cache-busting and resets load failures on URL change", () => {
   assert.match(renderer, /encodeURIComponent\(school\.logo\.version\)/);
-  assert.match(renderer, /useEffect\(\(\) => \{ setFailed\(false\); \}, \[url\]\)/);
+  assert.match(renderer, /useEffect\(\(\) => \{\s*setFailed\(false\);\s*setFit\(DEFAULT_FIT\);\s*\}, \[url\]\)/);
   assert.match(renderer, /onError=\{\(\) => setFailed\(true\)\}/);
 });

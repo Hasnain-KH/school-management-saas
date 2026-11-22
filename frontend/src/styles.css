@@ -318,7 +318,7 @@ svg { flex: 0 0 auto; }
   --logo-frame-border: var(--sidebar-line-strong);
   display: grid; width: 40px; height: 40px; place-items: center; flex: 0 0 auto;
   color: var(--sidebar-accent-ink); background: var(--sidebar-accent);
-  border-radius: 50%; box-shadow: var(--sh-xs);
+  border-radius: 50%; box-shadow: none;
 }
 .brand-light { color: var(--sidebar-muted); font-weight: var(--fw-medium); }
 .school-switcher {
@@ -336,23 +336,35 @@ svg { flex: 0 0 auto; }
 }
 
 /* Circular school branding: one shared, 1:1 frame for every tenant logo.
-   The image is fitted to the square inscribed in the circle, so contain keeps
-   the uploaded aspect ratio without pushing square corners into the border.
-   The stored asset is never re-encoded, cropped or overwritten for display. */
-.school-logo { position: relative; display: grid; place-items: center; flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; }
+   The base image box is the square inscribed in the circle. For transparent
+   assets the renderer measures the alpha bounds and applies a uniform,
+   centered content fit so internal transparent margins do not shrink the
+   visible mark. Opaque assets keep the complete source rectangle: white
+   margins may be legitimate artwork, so they are never guessed or trimmed.
+   The stored bytes are never re-encoded, cropped or overwritten. */
+.school-logo {
+  --logo-fit-inset: 14.645%;
+  --logo-scale: 1;
+  --logo-shift-x: 0%;
+  --logo-shift-y: 0%;
+  position: relative; display: grid; place-items: center; flex: 0 0 auto;
+  aspect-ratio: 1 / 1; overflow: hidden;
+}
 .school-logo--circle {
   border: 1px solid var(--logo-frame-border, var(--line));
   border-radius: 50%;
   background: var(--logo-frame-bg, var(--surface));
-  box-shadow: var(--sh-xs);
+  box-shadow: none;
 }
 .school-logo > svg { width: 62%; height: 62%; max-width: 62%; max-height: 62%; }
 .school-logo--image { color: var(--brand); }
 .school-logo img {
   position: absolute;
-  top: var(--logo-fit-inset, 16%); left: var(--logo-fit-inset, 16%);
-  display: block; width: calc(100% - 2 * var(--logo-fit-inset, 16%)); height: calc(100% - 2 * var(--logo-fit-inset, 16%));
-  box-sizing: border-box; object-fit: contain; padding: var(--logo-frame-padding, 1px);
+  top: var(--logo-fit-inset); left: var(--logo-fit-inset);
+  display: block; width: calc(100% - 2 * var(--logo-fit-inset)); height: calc(100% - 2 * var(--logo-fit-inset));
+  box-sizing: border-box; object-fit: contain; object-position: center;
+  transform-origin: center;
+  transform: translate(var(--logo-shift-x), var(--logo-shift-y)) scale(var(--logo-scale));
 }
 .school-logo--circle.school-avatar { box-shadow: none; }
 
@@ -999,7 +1011,6 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 .logo-preview {
   --logo-frame-bg: var(--surface);
   --logo-frame-border: var(--line-strong);
-  --logo-frame-padding: 2px;
   display: grid; flex: 0 0 auto; width: 104px; height: 104px; place-items: center;
   overflow: hidden; color: var(--brand); background: var(--brand-soft);
   border: 1px solid var(--line); border-radius: 50%; font-size: var(--fs-2xl); font-weight: var(--fw-bold);

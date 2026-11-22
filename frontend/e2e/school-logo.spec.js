@@ -50,50 +50,85 @@ const frameMetrics = (locator) => locator.evaluate((element) => {
   };
 });
 
-// Measures the painted image rectangle the same way the browser does for
-// object-fit: contain (the image is scaled into the img's padded content box).
-const fitMetrics = (locator) => locator.evaluate((frame) => {
-  const img = frame.querySelector("img");
-  if (!img) return null;
-  const frameRect = frame.getBoundingClientRect();
-  const imgRect = img.getBoundingClientRect();
-  const frameStyle = getComputedStyle(frame);
-  const imgStyle = getComputedStyle(img);
-  const padding = [
-    parseFloat(imgStyle.paddingTop), parseFloat(imgStyle.paddingRight),
-    parseFloat(imgStyle.paddingBottom), parseFloat(imgStyle.paddingLeft)
-  ];
-  const contentWidth = imgRect.width - padding[3] - padding[1];
-  const contentHeight = imgRect.height - padding[0] - padding[2];
-  const scale = Math.min(contentWidth / img.naturalWidth, contentHeight / img.naturalHeight);
-  const renderedWidth = img.naturalWidth * scale;
-  const renderedHeight = img.naturalHeight * scale;
-  const left = imgRect.left + padding[3] + (contentWidth - renderedWidth) / 2;
-  const top = imgRect.top + padding[0] + (contentHeight - renderedHeight) / 2;
-  const centerX = frameRect.left + frameRect.width / 2;
-  const centerY = frameRect.top + frameRect.height / 2;
-  const corners = [
-    [left, top], [left + renderedWidth, top],
-    [left, top + renderedHeight], [left + renderedWidth, top + renderedHeight]
-  ];
-  const maxCornerDistance = Math.max(...corners.map(([x, y]) => Math.hypot(x - centerX, y - centerY)));
-  return {
-    frameWidth: frameRect.width,
-    frameHeight: frameRect.height,
-    borderRadius: frameStyle.borderRadius,
-    frameBackground: frameStyle.backgroundColor,
-    borderWidth: parseFloat(frameStyle.borderTopWidth),
-    objectFit: imgStyle.objectFit,
-    padding,
-    renderedWidth,
-    renderedHeight,
-    centerOffsetX: left + renderedWidth / 2 - centerX,
-    centerOffsetY: top + renderedHeight / 2 - centerY,
-    aspectError: Math.abs(renderedWidth / renderedHeight - img.naturalWidth / img.naturalHeight),
-    clearance: frameRect.width / 2 - parseFloat(frameStyle.borderTopWidth) - maxCornerDistance,
-    fillRatio: Math.max(renderedWidth, renderedHeight) / frameRect.width
+// Measures the painted artwork rectangle, not merely the img element. The
+// source alpha bounds account for transparent/white margins that object-fit
+// would otherwise make the visible logo look much smaller than its box.
+const fitMetrics = async (locator, source) => {
+  const geometry = await locator.evaluate((frame) => {
+    const img = frame.querySelector("img");
+    if (!img) return null;
+    const frameRect = frame.getBoundingClientRect();
+    const imgRect = img.getBoundingClientRect();
+    const frameStyle = getComputedStyle(frame);
+    const imgStyle = getComputedStyle(img);
+    const matrix = new DOMMatrix(imgStyle.transform);
+    const transformScale = Math.hypot(matrix.a, matrix.b) || 1;
+    const padding = [
+      parseFloat(imgStyle.paddingTop) * transformScale, parseFloat(imgStyle.paddingRight) * transformScale,
+      parseFloat(imgStyle.paddingBottom) * transformScale, parseFloat(imgStyle.paddingLeft) * transformScale
+    ];
+    return {
+      frameWidth: frameRect.width,
+      frameHeight: frameRect.height,
+      borderRadius: frameStyle.borderRadius,
+      frameBackground: frameStyle.backgroundColor,
+      borderWidth: parseFloat(frameStyle.borderTopWidth),
+      objectFit: imgStyle.objectFit,
+      objectPosition: imgStyle.objectPosition,
+      padding,
+      transformScale,
+      naturalWidth: img.naturalWidth,
+      naturalHeight: img.naturalHeight,
+      contentWidth: imgRect.width - padding[3] - padding[1],
+      contentHeight: imgRect.height - padding[0] - padding[2],
+      contentLeft: imgRect.left - frameRect.left + padding[3],
+      contentTop: imgRect.top - frameRect.top + padding[0]
+    };
+  });
+  if (!geometry || !source?.alpha) return null;
+
+  const paintedScale = Math.min(
+    geometry.contentWidth / geometry.naturalWidth,
+    geometry.contentHeight / geometry.naturalHeight
+  );
+  const bounds = (region) => {
+    const width = region.w * paintedScale;
+    const height = region.h * paintedScale;
+    const left = geometry.contentLeft
+      + (geometry.contentWidth - geometry.naturalWidth * paintedScale) / 2
+      + region.x * paintedScale;
+    const top = geometry.contentTop
+      + (geometry.contentHeight - geometry.naturalHeight * paintedScale) / 2
+      + region.y * paintedScale;
+    const centerX = left + width / 2;
+    const centerY = top + height / 2;
+    const corners = [[left, top], [left + width, top], [left, top + height], [left + width, top + height]];
+    const maxCornerDistance = Math.max(...corners.map(([x, y]) =>
+      Math.hypot(x - geometry.frameWidth / 2, y - geometry.frameHeight / 2)));
+    return {
+      width, height, left, top, centerX, centerY,
+      fillRatio: Math.max(width, height) / geometry.frameWidth,
+      centerOffsetX: centerX - geometry.frameWidth / 2,
+      centerOffsetY: centerY - geometry.frameHeight / 2,
+      aspectError: Math.abs(width / height - region.w / region.h),
+      clearance: geometry.frameWidth / 2 - geometry.borderWidth - maxCornerDistance
+    };
   };
-});
+
+  const artwork = bounds(source.alpha);
+  const nonWhite = bounds(source.nonWhite ?? source.alpha);
+  return {
+    ...geometry,
+    artWidth: artwork.width,
+    artHeight: artwork.height,
+    fillRatio: artwork.fillRatio,
+    centerOffsetX: artwork.centerOffsetX,
+    centerOffsetY: artwork.centerOffsetY,
+    aspectError: artwork.aspectError,
+    clearance: artwork.clearance,
+    nonWhiteFillRatio: nonWhite.fillRatio
+  };
+};
 
 const expectWellFitted = (metrics) => {
   expect(metrics).toBeTruthy();
@@ -105,51 +140,95 @@ const expectWellFitted = (metrics) => {
   expect(Math.abs(metrics.centerOffsetY)).toBeLessThanOrEqual(0.5);
   expect(metrics.aspectError).toBeLessThan(0.01);
   expect(metrics.clearance).toBeGreaterThan(0);
-  expect(metrics.fillRatio).toBeGreaterThan(0.45);
-  expect(metrics.fillRatio).toBeLessThan(0.7);
+  expect(metrics.fillRatio).toBeGreaterThan(0.6);
+  expect(metrics.fillRatio).toBeLessThan(0.72);
 };
 
 // Creates real PNG sources for the image shapes that commonly expose fitting
-// problems: square, wide, tall, transparent and whitespace-heavy artwork.
+// problems: square, wide, tall, transparent margins and white margins.
 async function createLogoPng(page, kind) {
   const specs = {
-    square: [200, 200, false, 0.5],
-    landscape: [400, 120, false, 0.5],
-    portrait: [120, 400, false, 0.5],
-    transparent: [200, 200, true, 0.5],
-    whitespace: [400, 400, false, 0.25]
+    square: [240, 240, "circle", 0.45, true],
+    landscape: [480, 160, "rect", 0.82, true],
+    portrait: [160, 480, "rect", 0.82, true],
+    transparent: [400, 400, "rect", 0.25, true],
+    whitespace: [400, 400, "rect", 0.25, false]
   };
-  const [width, height, transparent, markScale] = specs[kind];
-  const dataUrl = await page.evaluate(({ width, height, transparent, markScale }) => {
+  const [width, height, shape, markScale, transparentBackground] = specs[kind];
+  const dataUrl = await page.evaluate(({ width, height, shape, markScale, transparentBackground }) => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, width, height);
-    context.fillStyle = transparent ? "rgba(0,0,0,0)" : "#2f5d8c";
-    context.fillRect(0, 0, width, height);
-    const markWidth = Math.round(width * markScale);
-    const markHeight = Math.round(height * markScale);
-    context.fillStyle = transparent ? "#159c7d" : "#ffffff";
-    context.fillRect(
-      Math.round((width - markWidth) / 2),
-      Math.round((height - markHeight) / 2),
-      markWidth,
-      markHeight
-    );
+    if (!transparentBackground) {
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+    }
+    context.fillStyle = "#1f6f8b";
+    if (shape === "circle") {
+      context.beginPath();
+      context.arc(width / 2, height / 2, Math.min(width, height) * markScale, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      const markWidth = Math.round(width * markScale);
+      const markHeight = Math.round(height * markScale);
+      context.fillRect(
+        Math.round((width - markWidth) / 2),
+        Math.round((height - markHeight) / 2),
+        markWidth,
+        markHeight
+      );
+    }
     return canvas.toDataURL("image/png");
-  }, { width, height, transparent, markScale });
-  return { kind, width, height, buffer: Buffer.from(dataUrl.split(",")[1], "base64") };
+  }, { width, height, shape, markScale, transparentBackground });
+
+  const source = await page.evaluate((src) => new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.drawImage(image, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const bounds = (matches) => {
+        let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
+        for (let y = 0; y < canvas.height; y += 1) {
+          for (let x = 0; x < canvas.width; x += 1) {
+            const index = (y * canvas.width + x) * 4;
+            if (!matches(data[index], data[index + 1], data[index + 2], data[index + 3])) continue;
+            minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+          }
+        }
+        if (maxX < 0) return null;
+        const w = maxX - minX + 1;
+        const h = maxY - minY + 1;
+        return { x: minX, y: minY, w, h, centerX: (minX + w / 2) / canvas.width, centerY: (minY + h / 2) / canvas.height };
+      };
+      resolve({
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        alpha: bounds((r, g, b, a) => a > 8),
+        nonWhite: bounds((r, g, b, a) => a > 8 && !(r > 245 && g > 245 && b > 245))
+      });
+    };
+    image.onerror = reject;
+    image.src = src;
+  }), dataUrl);
+
+  return { kind, width, height, buffer: Buffer.from(dataUrl.split(",")[1], "base64"), source };
 }
 
-async function waitForSavedLogo(page, version, width, height) {
-  await page.waitForFunction(({ version, width, height }) => {
+async function waitForSavedLogo(page, version, width, height, minimum = 5) {
+  await page.waitForFunction(({ version, width, height, minimum }) => {
     const images = [...document.querySelectorAll(".school-logo img")];
-    return images.length >= 5 && images.every((image) =>
+    return images.length >= minimum && images.every((image) =>
       image.complete && image.naturalWidth === width && image.naturalHeight === height
       && image.src.includes(`v=${version}`)
     );
-  }, { version, width, height });
+  }, { version, width, height, minimum });
 }
 
 // Mirrors the real API contract: /me/logo is a same-origin byte stream and the
@@ -181,7 +260,16 @@ async function signIn(page, { role = "school_admin", logo = null, brokenLogo = f
       if (request.method() === "GET") {
         if (state.brokenLogo) return respond(route, 502, null, "The school logo could not be loaded");
         if (!state.school.logo) return respond(route, 404, null, "This school does not have a logo");
-        return route.fulfill({ status: 200, contentType: "image/png", body: state.logoBuffer });
+        return route.fulfill({
+          status: 200,
+          contentType: "image/png",
+          body: state.logoBuffer,
+          headers: {
+            "Access-Control-Allow-Origin": "http://127.0.0.1:5173",
+            "Access-Control-Allow-Credentials": "true",
+            "Cache-Control": "no-store"
+          }
+        });
       }
       if (request.method() === "POST") {
         const body = request.postDataJSON?.() ?? {};
@@ -437,9 +525,14 @@ test("upload preview fits square, landscape and portrait images without distorti
 
 test("circular logo presentation stays inside the mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signIn(page, {
-    logo: { version: 4, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "mobile.png" }
+  const state = await signIn(page);
+  await page.goto("/school");
+  const logo = await createLogoPng(page, "square");
+  await page.getByLabel("Choose a logo image").setInputFiles({
+    name: "mobile.png", mimeType: "image/png", buffer: logo.buffer
   });
+  await page.getByRole("button", { name: "Save logo" }).click();
+  await expect(page.getByRole("status")).toContainText("uploaded successfully");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar")).toHaveClass(/sidebar-open/);
 
@@ -453,11 +546,18 @@ test("circular logo presentation stays inside the mobile viewport", async ({ pag
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
 
+  await waitForSavedLogo(page, state.school.logo.version, logo.width, logo.height, 4);
+  for (const selector of [
+    ".brand-mark", ".school-avatar", ".topbar-avatar .school-logo", ".profile-avatar .school-logo"
+  ]) {
+    expectWellFitted(await fitMetrics(page.locator(selector), logo.source));
+  }
+
   const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   expect(fits).toBe(true);
 });
 
-test("all five locations fit square, landscape, portrait, transparent and whitespace logos", async ({ page }) => {
+test("all five locations fit square, landscape, portrait, transparent and white-margin logos", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const state = await signIn(page);
@@ -480,14 +580,27 @@ test("all five locations fit square, landscape, portrait, transparent and whites
     const preview = page.getByRole("img", { name: "Selected logo preview" });
     await expect.poll(() => preview.evaluate((element) => element.naturalWidth)).toBe(image.width);
     await expect.poll(() => preview.evaluate((element) => element.naturalHeight)).toBe(image.height);
-    expectWellFitted(await fitMetrics(page.locator(".logo-preview .school-logo")));
+    const pendingMetrics = await fitMetrics(page.locator(".logo-preview .school-logo"), image.source);
+    expectWellFitted(pendingMetrics);
+
+    if (kind === "transparent") {
+      // Transparent margins are non-destructively discounted, so the painted
+      // artwork itself now fills the circle-safe area.
+      expect(pendingMetrics.nonWhiteFillRatio).toBeGreaterThan(0.6);
+    }
+    if (kind === "whitespace") {
+      // White margins may be legitimate artwork. The complete source is kept
+      // and the painted blue mark remains small; it is never auto-trimmed.
+      expect(pendingMetrics.nonWhiteFillRatio).toBeLessThan(0.25);
+      expect(pendingMetrics.fillRatio - pendingMetrics.nonWhiteFillRatio).toBeGreaterThan(0.35);
+    }
 
     await page.getByRole("button", { name: "Save logo" }).click();
     await expect(page.getByRole("status")).toContainText("uploaded successfully");
     await waitForSavedLogo(page, state.school.logo.version, image.width, image.height);
 
     for (const selector of savedLocations) {
-      expectWellFitted(await fitMetrics(page.locator(selector)));
+      expectWellFitted(await fitMetrics(page.locator(selector), image.source));
     }
   }
   expect(errors).toEqual([]);
@@ -497,11 +610,15 @@ test.describe("dark theme logo presentation", () => {
   test.use({ colorScheme: "dark" });
 
   test("logo frames keep a neutral background, subtle border and circle-safe fit", async ({ page }) => {
-    const state = await signIn(page, {
-      logo: { version: 3, contentType: "image/png", sizeBytes: pngBuffer.length, fileName: "dark.png" }
-    });
+    const state = await signIn(page);
     await page.goto("/school");
-    await waitForSavedLogo(page, state.school.logo.version, 1, 1);
+    const logo = await createLogoPng(page, "square");
+    await page.getByLabel("Choose a logo image").setInputFiles({
+      name: "dark.png", mimeType: "image/png", buffer: logo.buffer
+    });
+    await page.getByRole("button", { name: "Save logo" }).click();
+    await expect(page.getByRole("status")).toContainText("uploaded successfully");
+    await waitForSavedLogo(page, state.school.logo.version, logo.width, logo.height);
 
     for (const selector of [
       ".brand-mark",
@@ -510,7 +627,7 @@ test.describe("dark theme logo presentation", () => {
       ".profile-avatar .school-logo",
       ".logo-preview .school-logo"
     ]) {
-      const metrics = await fitMetrics(page.locator(selector));
+      const metrics = await fitMetrics(page.locator(selector), logo.source);
       expectWellFitted(metrics);
       expect(metrics.frameBackground).not.toBe("rgba(0, 0, 0, 0)");
       expect(metrics.borderWidth).toBe(1);
