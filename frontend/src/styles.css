@@ -336,8 +336,9 @@ svg { flex: 0 0 auto; }
 }
 
 /* Circular school branding: one shared, 1:1 frame for every tenant logo.
-   object-fit: contain preserves the uploaded aspect ratio inside the frame;
-   the stored asset is never re-encoded, cropped or overwritten for display. */
+   The image is fitted to the square inscribed in the circle, so contain keeps
+   the uploaded aspect ratio without pushing square corners into the border.
+   The stored asset is never re-encoded, cropped or overwritten for display. */
 .school-logo { position: relative; display: grid; place-items: center; flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; }
 .school-logo--circle {
   border: 1px solid var(--logo-frame-border, var(--line));
@@ -348,8 +349,10 @@ svg { flex: 0 0 auto; }
 .school-logo > svg { width: 62%; height: 62%; max-width: 62%; max-height: 62%; }
 .school-logo--image { color: var(--brand); }
 .school-logo img {
-  position: absolute; inset: 0; display: block; width: 100%; height: 100%; box-sizing: border-box;
-  object-fit: contain; padding: var(--logo-frame-padding, 3px); border-radius: inherit;
+  position: absolute;
+  top: var(--logo-fit-inset, 16%); left: var(--logo-fit-inset, 16%);
+  display: block; width: calc(100% - 2 * var(--logo-fit-inset, 16%)); height: calc(100% - 2 * var(--logo-fit-inset, 16%));
+  box-sizing: border-box; object-fit: contain; padding: var(--logo-frame-padding, 1px);
 }
 .school-logo--circle.school-avatar { box-shadow: none; }
 
@@ -996,7 +999,7 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 .logo-preview {
   --logo-frame-bg: var(--surface);
   --logo-frame-border: var(--line-strong);
-  --logo-frame-padding: 7px;
+  --logo-frame-padding: 2px;
   display: grid; flex: 0 0 auto; width: 104px; height: 104px; place-items: center;
   overflow: hidden; color: var(--brand); background: var(--brand-soft);
   border: 1px solid var(--line); border-radius: 50%; font-size: var(--fs-2xl); font-weight: var(--fw-bold);
