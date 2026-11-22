@@ -4,8 +4,8 @@ import { del, get, post, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import Modal from "../components/Modal.jsx";
 import ModuleHeader from "../components/ModuleHeader.jsx";
-import ConfirmDialog from "../components/ConfirmDialog.jsx";
-import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import { notify, confirmDanger } from "../components/feedback/appFeedback.js";
+import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -53,6 +53,7 @@ function UploadModal({ busy, onClose, onSubmit }) {
   const [studentsError, setStudentsError] = useState("");
   const [file, setFile] = useState(null);
   const [formError, setFormError] = useState("");
+  const [dirty, setDirty] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -79,19 +80,22 @@ function UploadModal({ busy, onClose, onSubmit }) {
         dataBase64,
         ...(values.studentId ? { studentId: values.studentId } : {})
       });
-    } catch (reason) {
-      setFormError(reason.message);
+      setDirty(false);
+    } catch {
+      setFormError("The selected file could not be read. Please try again.");
     }
   };
 
-  return <Modal title="Upload document" onClose={onClose}><form className="form-stack modal-form" onSubmit={submit}>
+  return <Modal title="Upload document" onClose={onClose} dirty={dirty && !busy} closeBlocked={busy} closeBlockedMessage="Please wait for the document upload to finish." dirtyMessage="You have an unfinished document upload. Close without saving?"><form className="form-stack modal-form" onSubmit={submit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}>
     {formError && <div className="form-error" role="alert">{formError}</div>}
     <label>Title<input name="title" required minLength={2} maxLength={160} /></label>
     <label>Category<select name="category" defaultValue="student">{CATEGORIES.map((category) => <option key={category} value={category}>{label(category)}</option>)}</select></label>
     <label>Link to student <span className="optional">(optional)</span><select name="studentId" defaultValue="" disabled={Boolean(studentsError)}><option value="">No linked student</option>{students.map((student) => <option key={student._id || student.id} value={student._id || student.id}>{student.firstName} {student.lastName} · {student.admissionNumber}</option>)}</select></label>
     {studentsError && <small className="field-hint">{studentsError} You can still upload without linking a student.</small>}
-    <label>File <span className="optional">(PDF, image, or Office document · max 5 MB)</span><input ref={fileRef} type="file" required onChange={(event) => { setFile(event.target.files?.[0] || null); setFormError(""); }} /></label>
-    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || !file}>{busy ? "Uploading…" : "Upload document"}</button></div>
+    <label>File <span className="optional">(PDF, image, or Office document · max 5 MB)</span><input ref={fileRef} type="file" required disabled={busy} onChange={(event) => { setFile(event.target.files?.[0] || null); setFormError(""); setDirty(true); }} /></label>
+    {file && <small className="field-hint">Selected: {file.name} ({formatSize(file.size)})</small>}
+    {busy && <div className="upload-status" role="status" aria-live="polite"><span className="upload-status-bar" aria-hidden="true" /><span>Uploading document… Please keep this window open.</span></div>}
+    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || !file}>{busy ? "Uploading…" : "Upload document"}</button></div>
   </form></Modal>;
 }
 
@@ -104,10 +108,8 @@ export default function DocumentsPage() {
   const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [confirmation, setConfirmation] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -129,12 +131,12 @@ export default function DocumentsPage() {
     setBusy(true);
     try {
       await post("/documents", payload);
-      setNotice({ type: "success", message: "Document uploaded." });
+      notify.success("Document uploaded.");
       setUploading(false);
       setPage(1);
       await load();
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Upload failed" });
     } finally {
       setBusy(false);
     }
@@ -145,23 +147,19 @@ export default function DocumentsPage() {
     try {
       const result = await get(`/documents/${document.id}/download`);
       if (result?.url) window.open(result.url, "_blank", "noopener,noreferrer");
-      else setNotice({ type: "error", message: "No download link is available for this document." });
+      else notify.error(new Error("Missing download link"), { title: "Download failed", description: "No download link is available for this document." });
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Download failed" });
     } finally {
       setBusy(false);
     }
   };
 
-  const confirmDelete = async () => {
+  const deleteDocument = async (document) => {
     setBusy(true);
     try {
-      await del(`/documents/${confirmation.id}`);
-      setNotice({ type: "success", message: "Document deleted." });
-      setConfirmation(null);
+      await del(`/documents/${document.id}`);
       await load();
-    } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
     } finally {
       setBusy(false);
     }
@@ -169,7 +167,6 @@ export default function DocumentsPage() {
 
   return <>
     <ModuleHeader title="Documents" description={canManage ? "Store and share student, staff, and school records securely." : "Documents your school has shared with you."} icon={FileText} action={canManage && <button className="button button-primary" onClick={() => setUploading(true)}><Plus size={16} />Upload document</button>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">
         <div><strong>Document library</strong><span>{pagination?.total ?? items.length} records</span></div>
@@ -177,7 +174,7 @@ export default function DocumentsPage() {
       </div>
       {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <>
         <div className="table-scroll"><table><thead><tr><th>Title</th><th>Category</th><th>File</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead>
-          <tbody>{items.map((document) => <tr key={document.id}>
+          <tbody className="motion-stagger">{items.map((document) => <tr key={document.id}>
             <td><strong>{document.title}</strong></td>
             <td><span className={`badge badge-${document.category}`}>{label(document.category)}</span></td>
             <td className="document-file"><FileText size={15} />{document.fileName}</td>
@@ -185,13 +182,19 @@ export default function DocumentsPage() {
             <td>{formatWhen(document.createdAt)}</td>
             <td><div className="row-actions">
               <button className="button button-small button-outline" disabled={busy} onClick={() => download(document)}><Download size={15} />Download</button>
-              {canManage && <button className="button button-small button-outline button-danger" disabled={busy} onClick={() => setConfirmation(document)}><Trash2 size={15} />Delete</button>}
+              {canManage && <button className="button button-small button-outline button-danger" disabled={busy} onClick={() => confirmDanger({
+                title: "Delete this document?",
+                message: `${document.title} will be removed from your document library.`,
+                confirmText: "Delete document",
+                onConfirm: () => deleteDocument(document),
+                success: "Document deleted.",
+                error: { title: "Delete failed" }
+              })}><Trash2 size={15} />Delete</button>}
             </div></td>
           </tr>)}</tbody></table></div>
         {pagination && pagination.pages > 1 && <div className="pagination"><span>Page {pagination.page} of {pagination.pages} · {pagination.total} records</span><div><button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button disabled={page >= pagination.pages} onClick={() => setPage((value) => value + 1)}>Next</button></div></div>}
       </> : <EmptyState title="No documents to show" detail={canManage ? "Upload a document to get started." : "Documents shared with you will appear here."} />}
     </section>
     {uploading && <UploadModal busy={busy} onClose={() => setUploading(false)} onSubmit={upload} />}
-    {confirmation && <ConfirmDialog title="Delete this document?" message={`${confirmation.title} will be removed from your document library.`} confirmLabel="Delete document" busy={busy} onClose={() => setConfirmation(null)} onConfirm={confirmDelete} />}
   </>;
 }

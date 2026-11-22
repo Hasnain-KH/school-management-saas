@@ -3,7 +3,6 @@ import { Activity, Archive, ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Ba
 import { api, get, patch, post, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import Modal from "../components/Modal.jsx";
-import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import RowMenu from "../components/RowMenu.jsx";
 import SchoolLogo from "../components/SchoolLogo.jsx";
 import ModuleHeader from "../components/ModuleHeader.jsx";
@@ -14,6 +13,7 @@ import { buildStudentAttendancePayload, lateStudentsMissingCheckIn, normalizeAtt
 import { buildExamPayload } from "../utils/exam-payload.js";
 import { buildFeeAssignmentPayload, buildVoucherGenerationPayload } from "../utils/finance-workflows.js";
 import AcademicSetupPage from "./AcademicSetupPage.jsx";
+import { notify, confirmAction, confirmDanger } from "../components/feedback/appFeedback.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const month = () => new Date().toISOString().slice(0, 7);
@@ -95,7 +95,6 @@ export default function WorkspacePage({ page }) {
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -130,18 +129,20 @@ export default function WorkspacePage({ page }) {
     : config?.columns || getColumns(items), [config, items, libraryLoans, page, user.role]);
   const createFields = useMemo(() => config?.create?.() || [], [config]);
   const returnLoan = async (loan) => {
+    if (busy) return;
     setBusy(true);
     try {
       await post(`/operations/library/loans/${loan._id}/return`, {});
-      setNotice({ type: "success", message: "Library book returned." });
       await load();
+      notify.success("Library book returned.");
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not return library book." });
+      notify.error(reason, { title: "Could not return library book." });
     } finally { setBusy(false); }
   };
   const onSearch = (event) => { event.preventDefault(); load({ page: 1 }); };
   const onCreate = async (event) => {
     event.preventDefault();
+    if (busy) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const body = {};
     for (const field of createFields) {
@@ -154,11 +155,11 @@ export default function WorkspacePage({ page }) {
     setBusy(true);
     try {
       await post(config.endpoint, body);
-      setNotice({ type: "success", message: `${title.replace(/s$/, "")} created successfully.` });
       setModal(false);
       await load({ page: 1 });
+      notify.success(`${title.replace(/s$/, "")} created successfully.`);
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Could not create record." });
     } finally { setBusy(false); }
   };
 
@@ -172,13 +173,13 @@ export default function WorkspacePage({ page }) {
   if (page === "my-children") return <ParentChildren />;
 
   return <><PageHeader title={title} description={description} icon={PAGE_ICONS[page]} action={canManage && !libraryLoans && <button className="button button-primary" onClick={() => setModal(true)}><Plus size={16} />Add {title.replace(/s$/, "").toLowerCase()}</button>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">{page === "library" && <div className="tabs" role="group" aria-label="Library view">{[["books", "Books"], ["loans", "Loans"]].map(([value, label]) => <button key={value} type="button" aria-pressed={filters.libraryTab === value} className={filters.libraryTab === value ? "tab active-tab" : "tab"} onClick={() => load({ page: 1, libraryTab: value })}>{label}</button>)}</div>}<div className="table-toolbar"><div><strong>{libraryLoans ? "Library loans" : `${title} directory`}</strong><span>{meta?.pagination?.total ?? items.length} records</span></div>{!libraryLoans && <form className="search-field" onSubmit={onSearch}><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${title.toLowerCase()}…`} aria-label={`Search ${title}`} /><button type="submit">Search</button></form>}</div>
-      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <><div className="table-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column}>{columnLabel(column)}</th>)}{page === "inventory" && <th>Stock movement</th>}{page === "library" && !libraryLoans && canManage && <th>Available copies</th>}{libraryLoans && canManage && <th>Action</th>}{["students", "staff", "academics"].includes(page) && canManage && <th>Actions</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id || item.id}>{visibleColumns.map((column) => <td key={column}><Cell value={item[column]} column={column} /></td>)}{page === "inventory" && <td><MovementButtons item={item} onMove={(type) => setRowAction({ type, item })} /></td>}{page === "library" && !libraryLoans && canManage && <td>{item.copiesAvailable > 0 ? <button className="button button-small button-outline" onClick={() => setRowAction({ type: "issue", item })}>Issue book</button> : <span className="muted">No copies</span>}</td>}{libraryLoans && canManage && <td>{item.status === "checked_out" ? <button className="button button-small button-outline" disabled={busy} onClick={() => returnLoan(item)}>Return book</button> : <span className="muted">Returned</span>}</td>}{["students", "staff", "academics"].includes(page) && canManage && <td>{page === "students" ? <RowMenu label={`Actions for ${item.firstName} ${item.lastName}`} items={[{ label: "Edit details", icon: <Pencil size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "edit", item }) }, { label: "Change status", icon: <ArrowRightLeft size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "status", item }) }]} /> : <button className="button button-small button-outline" onClick={() => setRowAction({ type: "edit", item })}>Edit</button>}</td>}</tr>)}</tbody></table></div><Pagination pagination={meta?.pagination} onPage={(value) => load({ page: value })} /></> : <EmptyState title={libraryLoans ? "No library loans" : `No ${title.toLowerCase()} to show`} detail={canManage ? "Create a record to get started. Your records will appear here." : "Records will appear here when your school has added them."} />}
+      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <><div className="table-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column}>{columnLabel(column)}</th>)}{page === "inventory" && <th>Stock movement</th>}{page === "library" && !libraryLoans && canManage && <th>Available copies</th>}{libraryLoans && canManage && <th>Action</th>}{["students", "staff", "academics"].includes(page) && canManage && <th>Actions</th>}</tr></thead><tbody className="motion-stagger">{items.map((item) => <tr key={item._id || item.id}>{visibleColumns.map((column) => <td key={column}><Cell value={item[column]} column={column} /></td>)}{page === "inventory" && <td><MovementButtons item={item} onMove={(type) => setRowAction({ type, item })} /></td>}{page === "library" && !libraryLoans && canManage && <td>{item.copiesAvailable > 0 ? <button className="button button-small button-outline" onClick={() => setRowAction({ type: "issue", item })}>Issue book</button> : <span className="muted">No copies</span>}</td>}{libraryLoans && canManage && <td>{item.status === "checked_out" ? <button className="button button-small button-outline" disabled={busy} onClick={() => returnLoan(item)}>Return book</button> : <span className="muted">Returned</span>}</td>}{["students", "staff", "academics"].includes(page) && canManage && <td>{page === "students" ? <RowMenu label={`Actions for ${item.firstName} ${item.lastName}`} items={[{ label: "Edit details", icon: <Pencil size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "edit", item }) }, { label: "Change status", icon: <ArrowRightLeft size={15} aria-hidden="true" />, onSelect: () => setRowAction({ type: "status", item }) }]} /> : <button className="button button-small button-outline" onClick={() => setRowAction({ type: "edit", item })}>Edit</button>}</td>}</tr>)}</tbody></table></div><Pagination pagination={meta?.pagination} onPage={(value) => load({ page: value })} /></> : <EmptyState title={libraryLoans ? "No library loans" : `No ${title.toLowerCase()} to show`} detail={canManage ? "Create a record to get started. Your records will appear here." : "Records will appear here when your school has added them."} />}
     </section>
     {modal && <CreateModal title={`Add ${title.replace(/s$/, "").toLowerCase()}`} fields={createFields} busy={busy} onClose={() => setModal(false)} onSubmit={onCreate} />}
     {rowAction && <RowActionModal page={page} action={rowAction} busy={busy} onClose={() => setRowAction(null)} onSubmit={async (event) => {
       event.preventDefault();
+      if (busy) return;
       const values = Object.fromEntries(new FormData(event.currentTarget));
       setBusy(true);
       try {
@@ -198,9 +199,10 @@ export default function WorkspacePage({ page }) {
         } else {
           await post("/operations/library/loans", { bookId: rowAction.item._id, studentId: values.studentId, dueAt: values.dueAt, note: values.note || undefined });
         }
-        setNotice({ type: "success", message: rowAction.type === "edit" ? "Record updated." : rowAction.type === "status" ? "Student status updated." : rowAction.type === "issue" ? "Book issued." : "Inventory movement recorded." });
+        const message = rowAction.type === "edit" ? "Record updated." : rowAction.type === "status" ? "Student status updated." : rowAction.type === "issue" ? "Book issued." : "Inventory movement recorded.";
         setRowAction(null); await load();
-      } catch (reason) { setNotice({ type: "error", message: reason.message }); }
+        notify.success(message);
+      } catch (reason) { notify.error(reason, { title: "Could not save this change." }); }
       finally { setBusy(false); }
     }} />}
   </>;
@@ -289,7 +291,8 @@ function CreateModal({ title, fields, busy, onClose, onSubmit }) {
     return () => { active = false; };
   }, [fields, dependencyKey]);
 
-  return <Modal title={title} onClose={onClose}><form className="form-stack modal-form" onSubmit={onSubmit}><div className="form-grid">{fields.map((field) => <label className={field.type === "textarea" ? "field-wide" : ""} key={field.name}>{field.label}{field.required && <span className="required"> *</span>}{field.type === "select" ? <select name={field.name} required={field.required} value={values[field.name] || ""} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}><option value="" disabled>{field.options?.length || options[field.name]?.length ? "Select…" : options.__error || "No options available"}</option>{field.options?.map((option) => <option key={option} value={option}>{option.replace(/_/g, " ")}</option>)}{options[field.name]?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea name={field.name} required={field.required} defaultValue={field.defaultValue || ""} rows={4} /> : <input name={field.name} type={field.type || "text"} required={field.required} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} />} {field.hint && <small className="field-hint">{field.hint}</small>}</label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button disabled={busy} className="button button-primary">{busy ? "Saving…" : "Create record"}</button></div></form></Modal>;
+  const [dirty, setDirty] = useState(false);
+  return <Modal title={title} onClose={onClose} dirty={dirty && !busy} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={onSubmit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}><div className="form-grid">{fields.map((field) => <label className={field.type === "textarea" ? "field-wide" : ""} key={field.name}>{field.label}{field.required && <span className="required"> *</span>}{field.type === "select" ? <select name={field.name} required={field.required} value={values[field.name] || ""} onChange={(event) => { setDirty(true); setValues((current) => ({ ...current, [field.name]: event.target.value })); }}><option value="" disabled>{field.options?.length || options[field.name]?.length ? "Select…" : options.__error || "No options available"}</option>{field.options?.map((option) => <option key={option} value={option}>{option.replace(/_/g, " ")}</option>)}{options[field.name]?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea name={field.name} required={field.required} defaultValue={field.defaultValue || ""} rows={4} /> : <input name={field.name} type={field.type || "text"} required={field.required} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} />} {field.hint && <small className="field-hint">{field.hint}</small>}</label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button disabled={busy} className="button button-primary">{busy ? "Saving…" : "Create record"}</button></div></form></Modal>;
 }
 
 function AttendancePage() {
@@ -298,42 +301,55 @@ function AttendancePage() {
   useEffect(() => { loadSections(); }, []);
   const loadRoster = useCallback(async () => { if (!sectionId) return; setLoading(true); setError(""); try { const result = await get(`/attendance/students${queryString({ date, sectionId })}`); const rows = normalizeAttendanceRoster(result.items || result.students || []); setRoster(rows); setStatus(Object.fromEntries(rows.map((student) => [student.id, student.status]))); setCheckIn(Object.fromEntries(rows.map((student) => [student.id, student.checkIn || ""]))); } catch (reason) { setError(reason.message); } finally { setLoading(false); } }, [sectionId, date]);
   useEffect(() => { loadRoster(); }, [loadRoster]);
-  const save = async () => { if (lateStudentsMissingCheckIn(roster, status, checkIn).length) { setNotice({ type: "error", message: "Add a check-in time for every student marked late." }); return; } setBusy(true); try { await post("/attendance/students", buildStudentAttendancePayload({ date, sectionId, roster, status, checkIn })); setNotice({ type: "success", message: "Attendance saved for this class." }); await loadRoster(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } };
+  const save = async () => {
+    if (busy) return;
+    if (lateStudentsMissingCheckIn(roster, status, checkIn).length) { setNotice({ type: "error", message: "Add a check-in time for every student marked late." }); return; }
+    setNotice(null);
+    setBusy(true);
+    try {
+      await post("/attendance/students", buildStudentAttendancePayload({ date, sectionId, roster, status, checkIn }));
+      await loadRoster();
+      notify.success("Attendance saved for this class.");
+    } catch (reason) {
+      notify.error(reason, { title: "Could not save attendance." });
+    } finally { setBusy(false); }
+  };
   return <><PageHeader title="Attendance" description="Record student attendance for a class and school day." icon={Activity} action={<button disabled={!roster.length || busy} className="button button-primary" onClick={save}><CheckIcon />{busy ? "Saving…" : "Save attendance"}</button>} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card table-card"><div className="filter-toolbar"><label>Section<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Choose a section</option>{sections.map((section) => <option key={section._id} value={section._id}>{section.className || section.classId} · {section.name}</option>)}</select></label><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={sectionsError ? loadSections : loadRoster} /> : roster.length ? <div className="table-scroll"><table><thead><tr><th>Student</th><th>Admission no.</th><th>Attendance status</th><th>Check-in time</th></tr></thead><tbody>{roster.map((student) => { const id = student.id; const value = status[id] || "present"; return <tr key={id}><td><strong>{student.firstName} {student.lastName}</strong></td><td>{student.admissionNumber || "—"}</td><td><select className="inline-select" value={value} onChange={(event) => setStatus((current) => ({ ...current, [id]: event.target.value }))}>{["present", "absent", "late", "leave"].map((option) => <option key={option} value={option}>{option[0].toUpperCase() + option.slice(1)}</option>)}</select></td><td>{value === "late" ? <input className="inline-select" type="time" required value={checkIn[id] || ""} onChange={(event) => setCheckIn((current) => ({ ...current, [id]: event.target.value }))} aria-label={`Check-in time for ${student.firstName} ${student.lastName}`} /> : <span className="muted">—</span>}</td></tr>; })}</tbody></table></div> : <EmptyState title="Choose a class section" detail="Available roster records follow your assigned-class permissions." />}</section></>;
 }
 
 function FinancePage() {
   const { user } = useAuth();
   const canManage = user.role === "school_admin";
-  const [tab, setTab] = useState("vouchers"); const [items, setItems] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [notice, setNotice] = useState(null); const [paying, setPaying] = useState(null); const [setup, setSetup] = useState(""); const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState("vouchers"); const [items, setItems] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [paying, setPaying] = useState(null); const [setup, setSetup] = useState(""); const [busy, setBusy] = useState(false);
   const load = async () => { setLoading(true); setError(""); try { const path = tab === "vouchers" ? "/finance/vouchers?outstandingOnly=true&limit=100" : tab === "categories" ? "/finance/categories?limit=100" : tab === "assignments" ? "/finance/assignments?limit=100" : "/finance/structures?limit=100"; const result = await get(path); setItems(result.items || []); } catch (reason) { setError(reason.message); } finally { setLoading(false); } };
   useEffect(() => { load(); }, [tab]);
-  const collect = async (event) => { event.preventDefault(); setBusy(true); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await post(`/finance/vouchers/${paying._id}/payments`, { idempotencyKey: crypto.randomUUID(), amountMinor: Math.round(Number(values.amount) * 100), method: values.method, reference: values.reference || undefined }); setNotice({ type: "success", message: "Payment recorded. A receipt is available in the transaction history." }); setPaying(null); await load(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } };
+  const collect = async (event) => { event.preventDefault(); if (busy) return; setBusy(true); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await post(`/finance/vouchers/${paying._id}/payments`, { idempotencyKey: crypto.randomUUID(), amountMinor: Math.round(Number(values.amount) * 100), method: values.method, reference: values.reference || undefined }); setPaying(null); await load(); notify.success("Payment recorded. A receipt is available in the transaction history."); } catch (reason) { notify.error(reason, { title: "Could not record payment." }); } finally { setBusy(false); } };
   const tabs = [["vouchers", "Outstanding vouchers"], ["structures", "Fee structures"], ["categories", "Categories"], ...(canManage ? [["assignments", "Student assignments"]] : [])];
   const startWorkflow = (value) => setSetup(value);
   const submitWorkflow = async (payload) => {
+    if (busy) return;
     setBusy(true);
     try {
       if (setup === "assignment") {
         await post("/finance/assignments", payload);
-        setNotice({ type: "success", message: "Student fee assignment created." });
         setSetup("");
         await load();
+        notify.success("Student fee assignment created.");
       } else {
         const result = await post("/finance/vouchers/generate", payload);
-        setNotice({ type: "success", message: `Voucher generation complete: ${result.generated} created, ${result.alreadyGenerated} already existed.` });
         setSetup("");
         setTab("vouchers");
         await load();
+        notify.success(`Voucher generation complete: ${result.generated} created, ${result.alreadyGenerated} already existed.`);
       }
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not complete the fee workflow." });
+      notify.error(reason, { title: "Could not complete the fee workflow." });
     } finally { setBusy(false); }
   };
   const columns = tab === "assignments"
     ? ["studentId", "feeStructureId", "startPeriod", "endPeriod", "discountAmountMinor", "discountBasisPoints", "scholarshipName", "isActive"]
     : ["period", "status", "amountDueMinor", "balanceMinor", "paidAmountMinor", "currency", "name", "code", "frequency"];
-  return <><PageHeader title="Fees & finance" description="Review fee balances, fee structures, and school collection activity." icon={CircleDollarSign} action={canManage && <>{["structures", "categories"].includes(tab) && <button className="button button-primary" onClick={() => startWorkflow(tab)}><Plus size={16} />Add {tab === "categories" ? "category" : "structure"}</button>}{tab === "assignments" && <button className="button button-primary" onClick={() => startWorkflow("assignment")}><Plus size={16} />Assign fees</button>}{tab === "vouchers" && <button className="button button-outline" onClick={() => startWorkflow("generate")}><Plus size={16} />Generate vouchers</button>}</>} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card table-card"><div className="tabs" role="group" aria-label="Finance record type">{tabs.map(([value, label]) => <button key={value} type="button" aria-pressed={tab === value} className={tab === value ? "tab active-tab" : "tab"} onClick={() => setTab(value)}>{label}</button>)}</div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll"><table><thead><tr>{columns.filter((key) => items.some((item) => item[key] !== undefined)).map((key) => <th key={key}>{columnLabel(key)}</th>)}{tab === "vouchers" && canManage && <th>Action</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id}>{columns.filter((key) => item[key] !== undefined).map((key) => <td key={key}>{key.endsWith("Minor") ? formatMinor(item[key], item.currency) : <Cell value={item[key]} column={key} />}</td>)}{tab === "vouchers" && canManage && <td><button className="button button-small button-primary" onClick={() => setPaying(item)}>Collect payment</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={`No ${tab} records`} detail="Fee records appear here once they are configured for this school." />}</section>{setup && ["categories", "structures"].includes(setup) && <FeeSetupModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={async (payload) => { setBusy(true); try { await post(setup === "categories" ? "/finance/categories" : "/finance/structures", payload); setNotice({ type: "success", message: `${setup === "categories" ? "Fee category" : "Fee structure"} created.` }); setSetup(""); await load(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } }} />}{setup && ["assignment", "generate"].includes(setup) && <FeeWorkflowModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={submitWorkflow} />}{paying && <Modal title={`Collect payment · ${paying.period}`} onClose={() => setPaying(null)}><form className="form-stack modal-form" onSubmit={collect}><p>Outstanding balance <strong>{formatMinor(paying.balanceMinor, paying.currency)}</strong></p><label>Amount<input name="amount" type="number" step="0.01" min="0.01" max={paying.balanceMinor / 100} required /></label><label>Payment method<select name="method">{["cash", "bank_transfer", "cheque", "other"].map((method) => <option key={method} value={method}>{method.replace("_", " ")}</option>)}</select></label><label>Reference <span className="optional">(optional)</span><input name="reference" maxLength="100" /></label><div className="modal-actions"><button type="button" className="button button-outline" onClick={() => setPaying(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div></form></Modal>}</>;
+  return <><PageHeader title="Fees & finance" description="Review fee balances, fee structures, and school collection activity." icon={CircleDollarSign} action={canManage && <>{["structures", "categories"].includes(tab) && <button className="button button-primary" onClick={() => startWorkflow(tab)}><Plus size={16} />Add {tab === "categories" ? "category" : "structure"}</button>}{tab === "assignments" && <button className="button button-primary" onClick={() => startWorkflow("assignment")}><Plus size={16} />Assign fees</button>}{tab === "vouchers" && <button className="button button-outline" onClick={() => startWorkflow("generate")}><Plus size={16} />Generate vouchers</button>}</>} /><section className="content-card table-card"><div className="tabs" role="group" aria-label="Finance record type">{tabs.map(([value, label]) => <button key={value} type="button" aria-pressed={tab === value} className={tab === value ? "tab active-tab" : "tab"} onClick={() => setTab(value)}>{label}</button>)}</div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll"><table><thead><tr>{columns.filter((key) => items.some((item) => item[key] !== undefined)).map((key) => <th key={key}>{columnLabel(key)}</th>)}{tab === "vouchers" && canManage && <th>Action</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id}>{columns.filter((key) => item[key] !== undefined).map((key) => <td key={key}>{key.endsWith("Minor") ? formatMinor(item[key], item.currency) : <Cell value={item[key]} column={key} />}</td>)}{tab === "vouchers" && canManage && <td><button className="button button-small button-primary" onClick={() => setPaying(item)}>Collect payment</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={`No ${tab} records`} detail="Fee records appear here once they are configured for this school." />}</section>{setup && ["categories", "structures"].includes(setup) && <FeeSetupModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={async (payload) => { if (busy) return; setBusy(true); try { await post(setup === "categories" ? "/finance/categories" : "/finance/structures", payload); setSetup(""); await load(); notify.success(`${setup === "categories" ? "Fee category" : "Fee structure"} created.`); } catch (reason) { notify.error(reason, { title: "Could not create fee setup record." }); } finally { setBusy(false); } }} />}{setup && ["assignment", "generate"].includes(setup) && <FeeWorkflowModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={submitWorkflow} />}{paying && <Modal title={`Collect payment · ${paying.period}`} onClose={() => setPaying(null)} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={collect}><p>Outstanding balance <strong>{formatMinor(paying.balanceMinor, paying.currency)}</strong></p><label>Amount<input name="amount" type="number" step="0.01" min="0.01" max={paying.balanceMinor / 100} required /></label><label>Payment method<select name="method">{["cash", "bank_transfer", "cheque", "other"].map((method) => <option key={method} value={method}>{method.replace("_", " ")}</option>)}</select></label><label>Reference <span className="optional">(optional)</span><input name="reference" maxLength="100" /></label><div className="modal-actions"><button type="button" className="button button-outline" onClick={() => setPaying(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div></form></Modal>}</>;
 }
 
 function FeeSetupModal({ mode, busy, onClose, onSubmit }) {
@@ -381,7 +397,7 @@ function FeeSetupModal({ mode, busy, onClose, onSubmit }) {
       <div className="form-grid"><label>Academic session<select name="academicSessionId" required defaultValue=""><option value="" disabled>Select a session</option>{options.sessions.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}</select></label><label>Class<select name="classId" required defaultValue=""><option value="" disabled>Select a class</option>{options.classes.map((item) => <option key={item._id} value={item._id}>{item.name} · {item.code}</option>)}</select></label><label>Structure name<input name="name" required minLength={2} maxLength={120} /></label><label>Code<input name="code" required maxLength={32} pattern="[A-Za-z0-9_-]+" /></label><label>Frequency<select name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="monthly">Monthly</option><option value="annual">Annual</option></select></label><label>Due day<input name="dueDay" type="number" min={1} max={28} defaultValue="10" /></label>{frequency === "annual" && <label>Due month<input name="dueMonth" type="number" min={1} max={12} required /></label>}<label>Currency<input name="currency" defaultValue="USD" required minLength={3} maxLength={3} pattern="[A-Za-z]{3}" /></label></div>
       <div className="fee-line-items"><strong>Fee line items</strong>{lineItems.map((item, index) => <div className="form-grid" key={index}><label>Category<select value={item.categoryId} required onChange={(event) => updateLine(index, "categoryId", event.target.value)}><option value="">Select a category</option>{options.categories.filter((category) => !usedCategories(index).has(category._id)).map((category) => <option value={category._id} key={category._id}>{category.name}</option>)}</select></label><label>Line name<input value={item.name} required maxLength={100} onChange={(event) => updateLine(index, "name", event.target.value)} /></label><label>Amount (minor units)<input type="number" min={1} max={100000000} step={1} required value={item.amountMinor} onChange={(event) => updateLine(index, "amountMinor", event.target.value)} /></label>{lineItems.length > 1 && <button type="button" className="button button-quiet" onClick={() => setLineItems((current) => current.filter((_, row) => row !== index))}>Remove line</button>}</div>)}<button type="button" className="button button-outline button-small" disabled={lineItems.length >= 30 || lineItems.length >= options.categories.length} onClick={() => setLineItems((current) => [...current, { categoryId: "", name: "", amountMinor: "" }])}>Add line item</button>{!options.categories.length && <small className="field-hint">Create at least one active fee category first.</small>}</div>
     </>}
-    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || (!isCategory && (optionsError || !options.categories.length || !options.sessions.length || !options.classes.length))}>{busy ? "Saving…" : "Create"}</button></div>
+    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || (!isCategory && (optionsError || !options.categories.length || !options.sessions.length || !options.classes.length))}>{busy ? "Saving…" : "Create"}</button></div>
   </form></Modal>;
 }
 
@@ -489,27 +505,43 @@ function FeeWorkflowModal({ mode, busy, onClose, onSubmit }) {
 
 function ExamsPage() {
   const { user } = useAuth();
-  const [exams, setExams] = useState([]); const [examId, setExamId] = useState(""); const [results, setResults] = useState(null);   const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [notice, setNotice] = useState(null); const [marking, setMarking] = useState(false); const [creating, setCreating] = useState(false); const [busy, setBusy] = useState(false); const [confirmPublish, setConfirmPublish] = useState(false);
+  const [exams, setExams] = useState([]); const [examId, setExamId] = useState(""); const [results, setResults] = useState(null);   const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [marking, setMarking] = useState(false); const [creating, setCreating] = useState(false); const [busy, setBusy] = useState(false);
   const load = async () => { setLoading(true); setError(""); try { const result = await get("/exams?limit=100"); setExams(result.items || []); setExamId((current) => current || result.items?.[0]?._id || ""); } catch (reason) { setError(reason.message); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
-  const loadResults = async () => { if (!examId) return; try { const result = await get(`/exams/${examId}/results?limit=100`); setResults(result); } catch (reason) { setResults(null); if (reason.status !== 409) setNotice({ type: "error", message: reason.message }); } };
+  const loadResults = async () => { if (!examId) return; try { const result = await get(`/exams/${examId}/results?limit=100`); setResults(result); } catch (reason) { setResults(null); if (reason.status !== 409) notify.error(reason, { title: "Could not load exam results." }); } };
   useEffect(() => { loadResults(); }, [examId]);
   const createExam = async (payload) => {
+    if (busy) return;
     setBusy(true);
     try {
       const exam = await post("/exams", payload);
       setExamId(exam._id);
       setCreating(false);
-      setNotice({ type: "success", message: "Exam schedule created." });
       await load();
+      notify.success("Exam schedule created.");
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not create exam." });
+      notify.error(reason, { title: "Could not create exam." });
     } finally { setBusy(false); }
   };
-  const publish = async () => { setBusy(true); try { await post(`/exams/${examId}/publish`, {}); setNotice({ type: "success", message: "Exam results published." }); setConfirmPublish(false); await load(); } catch (reason) { setNotice({ type: "error", message: reason.message }); } finally { setBusy(false); } };
+  const publishResults = () => {
+    if (busy) return;
+    confirmDanger({
+      title: "Publish exam results?",
+      message: `Results for ${selectedExam?.name || "this assessment"} will become visible to authorized students and parents.`,
+      confirmText: "Publish results",
+      onConfirm: async () => {
+        setBusy(true);
+        try {
+          await post(`/exams/${examId}/publish`, {});
+          await load();
+        } finally { setBusy(false); }
+      },
+      success: "Exam results published."
+    });
+  };
   const selectedExam = exams.find((item) => item._id === examId);
   const canManage = ["school_admin", "principal"].includes(user.role);
-  return <><PageHeader title="Exams & results" description={user.role === "teacher" ? "Enter marks only for subjects assigned to you and review published subject results." : "Review assessment schedules and published class results."} icon={BookOpen} action={<>{canManage && <button className="button button-outline" onClick={() => setCreating(true)}><Plus size={16} />Create exam</button>}{selectedExam && user.role === "teacher" && selectedExam.status === "scheduled" && <button className="button button-primary" onClick={() => setMarking(true)}><BookOpen size={16} />Enter marks</button>}{selectedExam && canManage && selectedExam.status === "scheduled" && <button className="button button-primary" onClick={() => setConfirmPublish(true)}><BookOpen size={16} />Publish results</button>}</>} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card table-card"><div className="filter-toolbar"><label>Assessment<select value={examId} onChange={(event) => setExamId(event.target.value)}><option value="">Select an exam</option>{exams.map((exam) => <option key={exam._id} value={exam._id}>{exam.name}</option>)}</select></label><span className={`badge badge-${selectedExam?.status || "active"}`}>{selectedExam?.status || "—"}</span></div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : results?.items?.length ? <div className="table-scroll"><table><thead><tr>{Object.keys(results.items[0]).filter((key) => !["_id", "schoolId"].includes(key)).slice(0, 6).map((key) => <th key={key}>{columnLabel(key)}</th>)}</tr></thead><tbody>{results.items.map((row, index) => <tr key={row.studentId || row.student?.id || index}>{Object.entries(row).filter(([key]) => !["_id", "schoolId"].includes(key)).slice(0, 6).map(([key, value]) => <td key={key}>{typeof value === "object" ? JSON.stringify(value) : String(value ?? "—")}</td>)}</tr>)}</tbody></table></div> : <EmptyState title={examId ? selectedExam?.status === "scheduled" ? "Assessment is not published" : "No results available yet" : "No assessments created"} detail={user.role === "teacher" ? "Marks and result details are limited to your assigned subjects." : "Results become available after marks are entered and the assessment is published."} />}</section>{creating && <ExamCreateModal busy={busy} onClose={() => setCreating(false)} onSubmit={createExam} />}{marking && selectedExam && <MarksEntryModal exam={selectedExam} onClose={() => setMarking(false)} onSaved={(message) => { setNotice({ type: "success", message }); setMarking(false); }} onError={(message) => setNotice({ type: "error", message })} />}{confirmPublish && <ConfirmDialog title="Publish exam results?" message={`Results for ${selectedExam?.name || "this assessment"} will become visible to authorized students and parents.`} confirmLabel="Publish results" busy={busy} onClose={() => setConfirmPublish(false)} onConfirm={publish} />}</>;
+  return <><PageHeader title="Exams & results" description={user.role === "teacher" ? "Enter marks only for subjects assigned to you and review published subject results." : "Review assessment schedules and published class results."} icon={BookOpen} action={<>{canManage && <button className="button button-outline" onClick={() => setCreating(true)}><Plus size={16} />Create exam</button>}{selectedExam && user.role === "teacher" && selectedExam.status === "scheduled" && <button className="button button-primary" onClick={() => setMarking(true)}><BookOpen size={16} />Enter marks</button>}{selectedExam && canManage && selectedExam.status === "scheduled" && <button className="button button-primary" disabled={busy} onClick={publishResults}><BookOpen size={16} />Publish results</button>}</>} /><section className="content-card table-card"><div className="filter-toolbar"><label>Assessment<select value={examId} onChange={(event) => setExamId(event.target.value)}><option value="">Select an exam</option>{exams.map((exam) => <option key={exam._id} value={exam._id}>{exam.name}</option>)}</select></label><span className={`badge badge-${selectedExam?.status || "active"}`}>{selectedExam?.status || "—"}</span></div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : results?.items?.length ? <div className="table-scroll"><table><thead><tr>{Object.keys(results.items[0]).filter((key) => !["_id", "schoolId"].includes(key)).slice(0, 6).map((key) => <th key={key}>{columnLabel(key)}</th>)}</tr></thead><tbody>{results.items.map((row, index) => <tr key={row.studentId || row.student?.id || index}>{Object.entries(row).filter(([key]) => !["_id", "schoolId"].includes(key)).slice(0, 6).map(([key, value]) => <td key={key}>{typeof value === "object" ? JSON.stringify(value) : String(value ?? "—")}</td>)}</tr>)}</tbody></table></div> : <EmptyState title={examId ? selectedExam?.status === "scheduled" ? "Assessment is not published" : "No results available yet" : "No assessments created"} detail={user.role === "teacher" ? "Marks and result details are limited to your assigned subjects." : "Results become available after marks are entered and the assessment is published."} />}</section>{creating && <ExamCreateModal busy={busy} onClose={() => setCreating(false)} onSubmit={createExam} />}{marking && selectedExam && <MarksEntryModal exam={selectedExam} onClose={() => setMarking(false)} onSaved={(message) => { notify.success(message); setMarking(false); }} onError={(reason) => notify.error(reason, { title: "Could not complete marks entry." })} />}</>;
 }
 
 function ExamCreateModal({ busy, onClose, onSubmit }) {
@@ -622,6 +654,7 @@ function MarksEntryModal({ exam, onClose, onSaved, onError }) {
   const [marks, setMarks] = useState({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [validationError, setValidationError] = useState("");
   const selectedSubject = exam.subjects.find((subject) => subject.classSubjectId === subjectId);
   useEffect(() => {
     let active = true;
@@ -634,7 +667,7 @@ function MarksEntryModal({ exam, onClose, onSaved, onError }) {
           setRoster(rows);
           setMarks(Object.fromEntries(rows.map((student) => [student.id, ""])));
         }
-      } catch (reason) { if (active) onError(reason.message); }
+      } catch (reason) { if (active) onError(reason); }
       finally { if (active) setLoading(false); }
     };
     fetchRoster();
@@ -642,19 +675,21 @@ function MarksEntryModal({ exam, onClose, onSaved, onError }) {
   }, [exam._id, subjectId]);
   const save = async (event) => {
     event.preventDefault();
+    if (busy) return;
+    setValidationError("");
     const records = roster.filter((student) => marks[student.id] !== "").map((student) => ({
       studentId: student.id,
       marksObtained: Number(marks[student.id])
     }));
-    if (!records.length) { onError("Enter at least one mark before saving."); return; }
+    if (!records.length) { setValidationError("Enter at least one mark before saving."); return; }
     setBusy(true);
     try {
       await post(`/exams/${exam._id}/marks`, { classSubjectId: subjectId, records });
       onSaved(`Saved marks for ${records.length} student${records.length === 1 ? "" : "s"}.`);
-    } catch (reason) { onError(reason.message); }
+    } catch (reason) { onError(reason); }
     finally { setBusy(false); }
   };
-  return <Modal title={`Enter marks · ${exam.name}`} onClose={onClose}><form className="form-stack modal-form" onSubmit={save}><label>Assigned subject<select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>{exam.subjects.map((subject) => <option value={subject.classSubjectId} key={subject.classSubjectId}>{subject.subjectName || subject.subjectId} · max {subject.maxMarks}</option>)}</select></label>{loading ? <SkeletonRows /> : roster.length ? <div className="marks-roster">{roster.map((student) => <label className="mark-row" key={student.id}><span><strong>{student.firstName} {student.lastName}</strong><small>{student.admissionNumber}</small></span><input aria-label={`Marks for ${student.firstName} ${student.lastName}`} type="number" min="0" max={selectedSubject?.maxMarks} step="0.01" value={marks[student.id] ?? ""} onChange={(event) => setMarks((current) => ({ ...current, [student.id]: event.target.value }))} /></label>)}</div> : <EmptyState title="No enrolled students found" />}<div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || loading || !roster.length}>{busy ? "Saving…" : "Save marks"}</button></div></form></Modal>;
+  return <Modal title={`Enter marks · ${exam.name}`} onClose={onClose} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={save}><label>Assigned subject<select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>{exam.subjects.map((subject) => <option value={subject.classSubjectId} key={subject.classSubjectId}>{subject.subjectName || subject.subjectId} · max {subject.maxMarks}</option>)}</select></label>{loading ? <SkeletonRows /> : roster.length ? <div className="marks-roster">{roster.map((student) => <label className="mark-row" key={student.id}><span><strong>{student.firstName} {student.lastName}</strong><small>{student.admissionNumber}</small></span><input aria-label={`Marks for ${student.firstName} ${student.lastName}`} type="number" min="0" max={selectedSubject?.maxMarks} step="0.01" value={marks[student.id] ?? ""} onChange={(event) => setMarks((current) => ({ ...current, [student.id]: event.target.value }))} /></label>)}</div> : <EmptyState title="No enrolled students found" />}{validationError && <div className="form-error" role="alert">{validationError}</div>}<div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || loading || !roster.length}>{busy ? "Saving…" : "Save marks"}</button></div></form></Modal>;
 }
 
 function ReportsPage() {
@@ -665,7 +700,6 @@ function ReportsPage() {
   const [data, setData] = useState({ items: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [options, setOptions] = useState({ classes: [], sessions: [], students: [] });
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [optionsError, setOptionsError] = useState("");
@@ -733,7 +767,7 @@ function ReportsPage() {
       if (format === "excel") await exportExcel(`${config.fileName}-report.xlsx`, rows, config.shortTitle);
       if (format === "pdf") printPdf(`${config.title} report`, rows);
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Could not export this report." });
     }
   };
 
@@ -743,7 +777,6 @@ function ReportsPage() {
       <button className="button button-outline" onClick={() => exportRows("excel")}>Excel</button>
       <button className="button button-outline" onClick={() => exportRows("pdf")}>PDF</button>
     </div>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card report-card">
       <div className="report-heading">
         <div><span className="page-kicker">REPORT BUILDER</span><h2>{config.title}</h2><p>{config.description}</p></div>
@@ -858,9 +891,7 @@ function SubscriptionPage({ page }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [dialog, setDialog] = useState(null);
-  const [confirmation, setConfirmation] = useState(null);
   const [busy, setBusy] = useState(false);
   const load = async () => {
     setLoading(true); setError("");
@@ -873,37 +904,65 @@ function SubscriptionPage({ page }) {
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [tab, page]);
-  const toggleSchool = async (school) => {
-    if (school.status !== "suspended") {
-      setConfirmation({ type: "suspend-school", item: school });
+  const toggleSchool = (school) => {
+    if (busy) return;
+    const reactivating = school.status === "suspended";
+    const changeStatus = async () => {
+      setBusy(true);
+      try {
+        await patch(`/platform/schools/${school._id}/status`, { status: reactivating ? "active" : "suspended" });
+        await load();
+      } finally { setBusy(false); }
+    };
+    if (reactivating) {
+      confirmAction({
+        title: "Reactivate this school?",
+        message: `${school.name} will regain access to its school workspace.`,
+        confirmText: "Reactivate school",
+        onConfirm: changeStatus,
+        success: "School reactivated."
+      });
       return;
     }
-    try {
-      await patch(`/platform/schools/${school._id}/status`, { status: school.status === "suspended" ? "active" : "suspended" });
-      setNotice({ type: "success", message: `School ${school.status === "suspended" ? "reactivated" : "suspended"}.` });
-      await load();
-    } catch (reason) { setNotice({ type: "error", message: reason.message }); }
+    confirmDanger({
+      title: "Suspend this school?",
+      message: `${school.name} will lose access to its school workspace until reactivated.`,
+      confirmText: "Suspend school",
+      onConfirm: changeStatus,
+      success: "School suspended."
+    });
   };
-  const confirmSuspendSchool = async () => {
-    const school = confirmation.item;
-    setBusy(true);
-    try {
-      await patch(`/platform/schools/${school._id}/status`, { status: "suspended" });
-      setNotice({ type: "success", message: "School suspended." });
-      setConfirmation(null);
-      await load();
-    } catch (reason) { setNotice({ type: "error", message: reason.message }); }
-    finally { setBusy(false); }
-  };
-  const updatePlanAvailability = async (plan) => {
-    try {
-      await patch(`/platform/plans/${plan._id}`, { isActive: !plan.isActive });
-      setNotice({ type: "success", message: `Plan ${plan.isActive ? "deactivated" : "activated"}.` });
-      await load();
-    } catch (reason) { setNotice({ type: "error", message: reason.message }); }
+  const updatePlanAvailability = (plan) => {
+    if (busy) return;
+    const activating = !plan.isActive;
+    const changeAvailability = async () => {
+      setBusy(true);
+      try {
+        await patch(`/platform/plans/${plan._id}`, { isActive: activating });
+        await load();
+      } finally { setBusy(false); }
+    };
+    if (activating) {
+      confirmAction({
+        title: "Activate this plan?",
+        message: `${plan.name} will become available for new subscriptions.`,
+        confirmText: "Activate plan",
+        onConfirm: changeAvailability,
+        success: "Plan activated."
+      });
+      return;
+    }
+    confirmDanger({
+      title: "Deactivate this plan?",
+      message: `${plan.name} will no longer be available for new subscriptions.`,
+      confirmText: "Deactivate plan",
+      onConfirm: changeAvailability,
+      success: "Plan deactivated."
+    });
   };
   const savePlan = async (event) => {
     event.preventDefault();
+    if (busy) return;
     const form = Object.fromEntries(new FormData(event.currentTarget));
     const features = Object.fromEntries(FEATURES.map((feature) => [feature, form[`feature:${feature}`] === "on"]));
     const asLimit = (name) => form[name] === "" ? null : Number(form[name]);
@@ -918,13 +977,14 @@ function SubscriptionPage({ page }) {
     setBusy(true);
     try {
       await post("/platform/plans", body);
-      setNotice({ type: "success", message: "Subscription plan created." });
       setDialog(null); await load();
-    } catch (reason) { setNotice({ type: "error", message: reason.message }); }
+      notify.success("Subscription plan created.");
+    } catch (reason) { notify.error(reason, { title: "Could not create subscription plan." }); }
     finally { setBusy(false); }
   };
   const saveSchoolPlan = async (event) => {
     event.preventDefault();
+    if (busy) return;
     const form = Object.fromEntries(new FormData(event.currentTarget));
     const body = { planId: form.planId, status: form.status };
     if (form.status === "trial" && form.trialEndsAt) body.trialEndsAt = new Date(`${form.trialEndsAt}T23:59:59.000Z`).toISOString();
@@ -932,20 +992,19 @@ function SubscriptionPage({ page }) {
     setBusy(true);
     try {
       await patch(`/platform/schools/${dialog.school._id}/subscription`, body);
-      setNotice({ type: "success", message: "School plan assignment updated." });
       setDialog(null); await load();
-    } catch (reason) { setNotice({ type: "error", message: reason.message }); }
+      notify.success("School plan assignment updated.");
+    } catch (reason) { notify.error(reason, { title: "Could not update school plan assignment." }); }
     finally { setBusy(false); }
   };
   if (!isPlatform) {
     const subscription = items[0];
-    return <><PageHeader title="Your subscription" description="Plan entitlements configured for your school workspace." icon={CircleDollarSign} /><Notice notice={notice} onClose={() => setNotice(null)} /><section className="content-card plan-card">{loading ? <LoadingState /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : subscription?.plan ? <><div className="plan-header"><div><span className="page-kicker">CURRENT PLAN</span><h2>{subscription.plan.name}</h2><p>{subscription.plan.priceMinor === 0 ? "Included trial plan" : `${formatMinor(subscription.plan.priceMinor, subscription.plan.currency)} / ${subscription.plan.billingInterval}`}</p></div><span className={`badge badge-${subscription.status}`}>{subscription.status}</span></div><div className="plan-limits">{Object.entries(subscription.plan.limits || {}).map(([key, limit]) => <div key={key}><span>{key}</span><strong>{subscription.usage?.[key] ?? 0} / {limit ?? "Unlimited"}</strong></div>)}</div><h3>Included features</h3><div className="feature-chips">{Object.entries(subscription.plan.features || {}).map(([feature, enabled]) => <span className={enabled ? "feature-on" : "feature-off"} key={feature}>{enabled ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />} {feature}</span>)}</div></> : <EmptyState title="No active plan assigned" detail="Contact your platform administrator for subscription setup." />}</section></>;
+    return <><PageHeader title="Your subscription" description="Plan entitlements configured for your school workspace." icon={CircleDollarSign} /><section className="content-card plan-card">{loading ? <SkeletonRows rows={4} /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : subscription?.plan ? <><div className="plan-header"><div><span className="page-kicker">CURRENT PLAN</span><h2>{subscription.plan.name}</h2><p>{subscription.plan.priceMinor === 0 ? "Included trial plan" : `${formatMinor(subscription.plan.priceMinor, subscription.plan.currency)} / ${subscription.plan.billingInterval}`}</p></div><span className={`badge badge-${subscription.status}`}>{subscription.status}</span></div><div className="plan-limits">{Object.entries(subscription.plan.limits || {}).map(([key, limit]) => <div key={key}><span>{key}</span><strong>{subscription.usage?.[key] ?? 0} / {limit ?? "Unlimited"}</strong></div>)}</div><h3>Included features</h3><div className="feature-chips">{Object.entries(subscription.plan.features || {}).map(([feature, enabled]) => <span className={enabled ? "feature-on" : "feature-off"} key={feature}>{enabled ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />} {feature}</span>)}</div></> : <EmptyState title="No active plan assigned" detail="Contact your platform administrator for subscription setup." />}</section></>;
   }
   return <>
-    <PageHeader title="Platform administration" description="Manage customer schools and configurable subscription plans." icon={tab === "plans" ? Receipt : LayoutDashboard} action={tab === "plans" && <button className="button button-primary" onClick={() => setDialog({ type: "create-plan" })}><Plus size={16} />Create plan</button>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
+    <PageHeader title="Platform administration" description="Manage customer schools and configurable subscription plans." icon={tab === "plans" ? Receipt : LayoutDashboard} action={tab === "plans" && <button className="button button-primary" disabled={busy} onClick={() => setDialog({ type: "create-plan" })}><Plus size={16} />Create plan</button>} />
     <div className="tabs platform-tabs" role="group" aria-label="Platform administration view"><button type="button" aria-pressed={tab === "schools"} className={tab === "schools" ? "tab active-tab" : "tab"} onClick={() => setTab("schools")}>Schools</button><button type="button" aria-pressed={tab === "plans"} className={tab === "plans" ? "tab active-tab" : "tab"} onClick={() => setTab("plans")}>Plans</button></div>
-    <section className="content-card table-card">
+    <section className="content-card table-card tab-panel" key={tab}>
       {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll">
         <table><thead><tr>{tab === "schools" ? ["name", "slug", "email", "status", "subscription"].map((key) => <th key={key}>{columnLabel(key)}</th>) : ["name", "code", "priceMinor", "currency", "billingInterval", "limits", "isActive", "isDefaultTrial"].map((key) => <th key={key}>{columnLabel(key)}</th>)}<th>Actions</th></tr></thead>
           <tbody>{items.map((item) => <tr key={item._id}>{tab === "schools" ? <>
@@ -953,14 +1012,13 @@ function SubscriptionPage({ page }) {
             <td><RowMenu label={`Actions for ${item.name}`} items={[{ label: "Manage plan", icon: <CircleDollarSign size={15} aria-hidden="true" />, onSelect: () => setDialog({ type: "school-plan", school: item }) }, { label: item.status === "suspended" ? "Reactivate school" : "Suspend school", icon: item.status === "suspended" ? <RefreshCw size={15} aria-hidden="true" /> : <Ban size={15} aria-hidden="true" />, danger: item.status !== "suspended", onSelect: () => toggleSchool(item) }]} /></td>
           </> : <>
             <td><strong>{item.name}</strong></td><td>{item.code}</td><td>{formatMinor(item.priceMinor, item.currency)}</td><td>{item.currency}</td><td>{item.billingInterval}</td><td><ul className="limit-list">{Object.entries(item.limits || {}).map(([key, limit]) => <li key={key}>{columnLabel(key)}: {limit ?? "Unlimited"}</li>)}</ul></td><td><span className={`badge badge-${item.isActive ? "active" : "suspended"}`}>{item.isActive ? "Active" : "Inactive"}</span></td><td>{item.isDefaultTrial ? "Default trial" : "—"}</td>
-            <td><button disabled={item.isDefaultTrial && item.isActive} className="button button-small button-outline" onClick={() => updatePlanAvailability(item)}>{item.isActive ? "Deactivate" : "Activate"}</button></td>
+            <td><button disabled={busy || (item.isDefaultTrial && item.isActive)} className="button button-small button-outline" onClick={() => updatePlanAvailability(item)}>{item.isActive ? "Deactivate" : "Activate"}</button></td>
           </>}</tr>)}</tbody>
         </table>
       </div> : <EmptyState title="No records found" detail="No records are currently available." />}
     </section>
     {dialog?.type === "create-plan" && <PlanCreateModal busy={busy} onClose={() => setDialog(null)} onSubmit={savePlan} />}
     {dialog?.type === "school-plan" && <SchoolPlanModal school={dialog.school} busy={busy} onClose={() => setDialog(null)} onSubmit={saveSchoolPlan} />}
-    {confirmation?.type === "suspend-school" && <ConfirmDialog title="Suspend this school?" message={`${confirmation.item.name} will lose access to its school workspace until reactivated.`} confirmLabel="Suspend school" busy={busy} onClose={() => setConfirmation(null)} onConfirm={confirmSuspendSchool} />}
   </>;
 }
 
@@ -985,7 +1043,7 @@ function SchoolPlanModal({ school, busy, onClose, onSubmit }) {
   const [planId, setPlanId] = useState(school.subscription?.planId || "");
   const eligiblePlans = plans.filter((plan) => status === "trial" ? plan.isDefaultTrial : status === "active" ? !plan.isDefaultTrial : true);
   const selectedPlanId = eligiblePlans.some((plan) => plan._id === planId) ? planId : "";
-  return <Modal title={`Manage plan · ${school.name}`} onClose={onClose}><form className="form-stack modal-form" onSubmit={onSubmit}>
+  return <Modal title={`Manage plan · ${school.name}`} onClose={onClose} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={onSubmit}>
     {error && <div className="form-error" role="alert">{error}</div>}
     <label>Subscription plan<select name="planId" required value={selectedPlanId} onChange={(event) => setPlanId(event.target.value)}><option value="" disabled>Select a plan for this status</option>{eligiblePlans.map((plan) => <option key={plan._id} value={plan._id}>{plan.name} · {plan.code}</option>)}</select></label>
     <label>Subscription status<select name="status" value={status} onChange={(event) => setStatus(event.target.value)}>{["trial", "active", "past_due", "canceled"].map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}</select></label>
@@ -995,6 +1053,24 @@ function SchoolPlanModal({ school, busy, onClose, onSubmit }) {
     {plans.length > 0 && !eligiblePlans.length && <div className="form-error" role="alert">No active plan is configured for this subscription status.</div>}
     <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || !eligiblePlans.length}>{busy ? "Saving…" : "Save subscription"}</button></div>
   </form></Modal>;
+}
+
+const SUBSCRIPTION_DAY_MS = 24 * 60 * 60 * 1000;
+
+function subscriptionEndInfo(subscription) {
+  const rawEnd = subscription?.status === "trial"
+    ? subscription.trialEndsAt
+    : subscription?.currentPeriodEnd;
+  const endMs = rawEnd ? Date.parse(rawEnd) : Number.NaN;
+  if (!Number.isFinite(endMs)) return { date: "—", daysLeft: "—" };
+
+  const remainingDays = Math.ceil((endMs - Date.now()) / SUBSCRIPTION_DAY_MS);
+  return {
+    date: new Date(endMs).toLocaleDateString(),
+    daysLeft: remainingDays <= 0
+      ? "Expired"
+      : `${remainingDays} day${remainingDays === 1 ? "" : "s"}`
+  };
 }
 
 function SchoolProfile() {
@@ -1012,17 +1088,31 @@ function SchoolProfile() {
 
   const handleLogoChange = (logo) => setSchool((current) => current ? { ...current, logo } : current);
 
+  if (loading) return <><PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} /><section className="content-card"><SkeletonRows rows={4} /></section></>;
+  if (error) return <><PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} /><ErrorState error={{ message: error }} onRetry={load} /></>;
+
+  const subscription = school.subscription ?? {};
+  const appOrigin = window.location.origin;
+  const endInfo = subscriptionEndInfo(subscription);
+
   return <>
     <PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} />
-    {loading ? <LoadingState /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : <>
-      <div className="content-card profile-card">
+    <div className="content-card profile-card">
+      <div className="profile-identity">
         <span className="profile-logo"><SchoolLogo school={school} size={36} fallback={school.name?.slice(0, 1)} /></span>
         <h2>{school.name}</h2>
         <p>{school.email}</p>
-        <div className="profile-details">{[["Workspace URL", school.slug], ["Status", school.status], ["Plan", school.subscription?.plan], ["Subscription status", school.subscription?.status], ["Current period end", school.subscription?.currentPeriodEnd ? new Date(school.subscription.currentPeriodEnd).toLocaleDateString() : "—"]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value || "—"}</strong></div>)}</div>
       </div>
-      <SchoolLogoManager school={school} onUpdated={handleLogoChange} />
-    </>}
+      <div className="profile-details">
+        <div><span>Workspace slug</span><strong className="profile-value-literal">{school.slug || "—"}</strong></div>
+        <div><span>Workspace URL</span><strong className="profile-value-literal profile-url"><a href={`${appOrigin}/`}>{appOrigin}</a></strong></div>
+        <div><span>Status</span><strong>{subscription.status || school.status || "—"}</strong></div>
+        <div><span>Plan</span><strong>{subscription.plan || "—"}</strong></div>
+        <div><span>End date</span><strong>{endInfo.date}</strong></div>
+        <div><span>Days left</span><strong className="profile-value-literal">{endInfo.daysLeft}</strong></div>
+      </div>
+    </div>
+    <SchoolLogoManager school={school} onUpdated={handleLogoChange} />
   </>;
 }
 
@@ -1040,7 +1130,7 @@ function ParentChildren() {
     setTab(tabs[nextIndex]);
     event.currentTarget.parentElement.querySelector(`[data-tab="${tabs[nextIndex]}"]`)?.focus();
   };
-  return <><PageHeader title="My children" description="Personal school updates, visible only for students linked to your verified parent account." icon={Users} />{children.length > 0 && <section className="content-card table-card"><div className="filter-toolbar"><label>Student<select value={selected} onChange={(event) => setSelected(event.target.value)}>{children.map((child) => <option key={child.id} value={child.id}>{child.firstName} {child.lastName} · {child.admissionNumber}</option>)}</select></label><div className="tabs" role="tablist" aria-label="Student records">{["attendance", "fees", "results"].map((value) => <button key={value} type="button" role="tab" data-tab={value} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} id={`parent-tab-${value}`} aria-controls="parent-records" className={tab === value ? "tab active-tab" : "tab"} onKeyDown={(event) => changeTab(event, value)} onClick={() => setTab(value)}>{value}</button>)}</div></div><div id="parent-records" role="tabpanel" aria-labelledby={`parent-tab-${tab}`}>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={loadDetail} /> : <ParentRecords tab={tab} detail={detail} />}</div></section>}{loading && !children.length && <LoadingState />}{error && !children.length && <ErrorState error={{ message: error }} onRetry={load} />}</>;
+  return <><PageHeader title="My children" description="Personal school updates, visible only for students linked to your verified parent account." icon={Users} />{children.length > 0 && <section className="content-card table-card"><div className="filter-toolbar"><label>Student<select value={selected} onChange={(event) => setSelected(event.target.value)}>{children.map((child) => <option key={child.id} value={child.id}>{child.firstName} {child.lastName} · {child.admissionNumber}</option>)}</select></label><div className="tabs" role="tablist" aria-label="Student records">{["attendance", "fees", "results"].map((value) => <button key={value} type="button" role="tab" data-tab={value} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} id={`parent-tab-${value}`} aria-controls="parent-records" className={tab === value ? "tab active-tab" : "tab"} onKeyDown={(event) => changeTab(event, value)} onClick={() => setTab(value)}>{value}</button>)}</div></div><div id="parent-records" role="tabpanel" aria-labelledby={`parent-tab-${tab}`} className="tab-panel" key={tab}>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={loadDetail} /> : <ParentRecords tab={tab} detail={detail} />}</div></section>}{loading && !children.length && <section className="content-card"><SkeletonRows rows={3} /></section>}{error && !children.length && <ErrorState error={{ message: error }} onRetry={load} />}</>;
 }
 
 function ParentRecords({ tab, detail }) {

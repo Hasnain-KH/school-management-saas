@@ -3,9 +3,9 @@ import { BookOpen, Pencil, Plus, Trash2 } from "../components/ui/icon/icons.jsx"
 import { del, get, patch, post, queryString } from "../api/client.js";
 import Modal from "../components/Modal.jsx";
 import ModuleHeader from "../components/ModuleHeader.jsx";
-import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import RowMenu from "../components/RowMenu.jsx";
-import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback.jsx";
+import { confirmAction, confirmDanger, notify } from "../components/feedback/appFeedback.js";
 import { buildAcademicSetupPayload } from "../utils/academic-setup.js";
 
 const TABS = [
@@ -56,9 +56,7 @@ export default function AcademicSetupPage() {
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,8 +78,8 @@ export default function AcademicSetupPage() {
         ? await get(`/academics/timetable${queryString({ academicSessionId: selectedSession, limit: 100 })}`)
         : { items: [] };
       setRecords((current) => ({ ...current, timetable: timetable.items || [] }));
-    } catch (reason) {
-      setError(reason.message || "Could not load academic setup.");
+    } catch {
+      setError("Could not load academic setup. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -96,7 +94,7 @@ export default function AcademicSetupPage() {
     let active = true;
     get("/users?role=teacher&status=active&limit=100")
       .then((result) => { if (active) setTeachers(result.items || []); })
-      .catch((reason) => { if (active) setTeachersError(reason.message || "Teacher list is unavailable."); });
+      .catch(() => { if (active) setTeachersError("Teacher list is unavailable."); });
     return () => { active = false; };
   }, []);
 
@@ -108,53 +106,72 @@ export default function AcademicSetupPage() {
     }
     get(`/academics/timetable${queryString({ academicSessionId: sessionId, limit: 100 })}`)
       .then((result) => { if (active) setRecords((current) => ({ ...current, timetable: result.items || [] })); })
-      .catch((reason) => { if (active) setError(reason.message || "Could not load the timetable."); });
+      .catch(() => { if (active) setError("Could not load the timetable."); });
     return () => { active = false; };
   }, [sessionId]);
 
   const submit = async (event) => {
     event.preventDefault();
+    if (busy) return;
     const form = Object.fromEntries(new FormData(event.currentTarget));
     const { endpoint, body } = buildAcademicSetupPayload(tab, form);
     setBusy(true);
     try {
       if (editing && tab === "classes") await patch(`/academics/classes/${editing._id}`, body);
       else await post(endpoint, body);
-      setNotice({ type: "success", message: editing ? `${tabLabel(tab).replace(/s$/, "")} updated.` : `${tabLabel(tab).replace(/s$/, "")} record created.` });
+      notify.success(editing ? `${tabLabel(tab).replace(/s$/, "")} updated.` : `${tabLabel(tab).replace(/s$/, "")} record created.`);
       setDialog(false);
       setEditing(null);
       await load();
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not save this academic record." });
+      notify.error(reason);
     } finally {
       setBusy(false);
     }
   };
 
-  const activateSession = async (id) => {
-    try {
-      await post(`/academics/sessions/${id}/activate`, {});
-      setNotice({ type: "success", message: "Academic session activated." });
-      await load();
-    } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not activate session." });
-    }
+  const activateSession = (id) => {
+    if (busy) return;
+    confirmAction({
+      title: "Activate academic session?",
+      message: "This session will become the active session for the school. The previously active session will no longer be active.",
+      confirmText: "Activate session",
+      variant: "warning",
+      onConfirm: async () => {
+        setBusy(true);
+        try {
+          await post(`/academics/sessions/${id}/activate`, {});
+          await load();
+        } finally {
+          setBusy(false);
+        }
+      },
+      success: "Academic session activated.",
+      error: { title: "The session could not be activated" }
+    });
   };
 
-  const removeRecord = async () => {
-    if (!confirm) return;
-    setBusy(true);
-    try {
-      const path = confirm.kind === "timetable" ? `/academics/timetable/${confirm.item._id}` : `/academics/class-subjects/${confirm.item._id}`;
-      await del(path);
-      setNotice({ type: "success", message: confirm.kind === "timetable" ? "Timetable period removed." : "Class subject removed." });
-      setConfirm(null);
-      await load();
-    } catch (reason) {
-      setNotice({ type: "error", message: reason.message || "Could not remove this record." });
-    } finally {
-      setBusy(false);
-    }
+  const removeRecord = (target) => {
+    if (!target || busy) return;
+    confirmDanger({
+      title: target.kind === "timetable" ? "Remove this timetable period?" : "Remove this class subject?",
+      message: target.kind === "timetable"
+        ? "The scheduled period will be deleted from the timetable. This cannot be undone."
+        : "The subject will no longer be assigned to this class for the selected session. Periods that already reference it in the timetable will block removal.",
+      confirmText: target.kind === "timetable" ? "Remove period" : "Remove class subject",
+      onConfirm: async () => {
+        setBusy(true);
+        try {
+          const path = target.kind === "timetable" ? `/academics/timetable/${target.item._id}` : `/academics/class-subjects/${target.item._id}`;
+          await del(path);
+          await load();
+        } finally {
+          setBusy(false);
+        }
+      },
+      success: target.kind === "timetable" ? "Timetable period removed." : "Class subject removed.",
+      error: { title: target.kind === "timetable" ? "The timetable period could not be removed" : "The class subject could not be removed" }
+    });
   };
 
   const items = records[tab] || [];
@@ -178,39 +195,28 @@ export default function AcademicSetupPage() {
       icon={BookOpen}
       action={<button className="button button-primary" onClick={() => { setEditing(null); setDialog(true); }}><Plus size={16} />Add {tabLabel(tab).replace(/s$/, "").toLowerCase()}</button>}
     />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="tabs" role="tablist" aria-label="Academic setup categories">{TABS.map(([key, label]) => <button key={key} type="button" role="tab" id={`academic-tab-${key}`} aria-controls="academic-tab-panel" data-academic-tab={key} aria-selected={tab === key} tabIndex={tab === key ? 0 : -1} className={tab === key ? "tab active-tab" : "tab"} onKeyDown={onTabKeyDown} onClick={() => { setTab(key); setEditing(null); setDialog(false); }}>{label}</button>)}</div>
-      <div id="academic-tab-panel" role="tabpanel" aria-labelledby={`academic-tab-${tab}`}>
+      <div key={tab} className="tab-panel" id="academic-tab-panel" role="tabpanel" aria-labelledby={`academic-tab-${tab}`}>
         {tab === "timetable" && <div className="filter-toolbar"><label>Academic session<select value={sessionId} onChange={(event) => setSessionId(event.target.value)}><option value="">Select a session</option>{sessions.map((item) => <option value={item._id} key={item._id}>{item.name} · {item.status}</option>)}</select></label></div>}
         {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll"><table>
           <thead><tr>{TABLES[tab].map(([, label]) => <th key={label}>{label}</th>)}{tab === "sessions" && <th>Action</th>}{tab === "classes" && <th>Action</th>}{["assignments", "timetable"].includes(tab) && <th>Actions</th>}</tr></thead>
-          <tbody>{items.map((item) => <tr key={item._id}>
+          <tbody className={items.length <= 25 ? "motion-stagger" : undefined}>{items.map((item) => <tr key={item._id}>
             {TABLES[tab].map(([key]) => <td key={key}>{renderCell(tab, key, item, lookups)}</td>)}
-            {tab === "sessions" && <td>{item.status !== "active" && item.status !== "completed" && <button className="button button-small button-outline" onClick={() => activateSession(item._id)}>Activate</button>}</td>}
+            {tab === "sessions" && <td>{item.status !== "active" && item.status !== "completed" && <button className="button button-small button-outline" disabled={busy} onClick={() => activateSession(item._id)}>Activate</button>}</td>}
             {tab === "classes" && <td><button className="button button-small button-outline" onClick={() => { setEditing(item); setDialog(true); }}><Pencil size={14} aria-hidden="true" />Edit</button></td>}
             {tab === "assignments" && <td><RowMenu label={`Actions for ${referenceText("subjectId", item.subjectId, item, lookups)}`} items={[
               { label: "Update assignment", icon: <Pencil size={15} aria-hidden="true" />, onSelect: () => { setEditing(item); setDialog(true); } },
-              { label: "Remove", icon: <Trash2 size={15} aria-hidden="true" />, danger: true, onSelect: () => setConfirm({ kind: "assignment", item }) }
+              { label: "Remove", icon: <Trash2 size={15} aria-hidden="true" />, danger: true, onSelect: () => removeRecord({ kind: "assignment", item }) }
             ]} /></td>}
             {tab === "timetable" && <td><RowMenu label="Timetable period actions" items={[
-              { label: "Remove period", icon: <Trash2 size={15} aria-hidden="true" />, danger: true, onSelect: () => setConfirm({ kind: "timetable", item }) }
+              { label: "Remove period", icon: <Trash2 size={15} aria-hidden="true" />, danger: true, onSelect: () => removeRecord({ kind: "timetable", item }) }
             ]} /></td>}
           </tr>)}</tbody>
         </table></div> : <EmptyState title={`No ${tabLabel(tab).toLowerCase()} yet`} detail={tab === "timetable" && !sessionId ? "Create an academic session before scheduling periods." : "Create a record to get started."} />}
       </div>
     </section>
     {dialog && <AcademicFormModal tab={tab} editing={editing} busy={busy} sessions={sessions} classes={classes} branches={branches} sections={sections} subjects={subjects} assignments={assignments} teachers={teachers} teachersError={teachersError} sessionId={sessionId} onClose={() => { setDialog(false); setEditing(null); }} onSubmit={submit} />}
-    {confirm && <ConfirmDialog
-      title={confirm.kind === "timetable" ? "Remove this timetable period?" : "Remove this class subject?"}
-      message={confirm.kind === "timetable"
-        ? "The scheduled period will be deleted from the timetable. This cannot be undone."
-        : "The subject will no longer be assigned to this class for the selected session. Periods that already reference it in the timetable will block removal."}
-      confirmLabel={confirm.kind === "timetable" ? "Remove period" : "Remove class subject"}
-      busy={busy}
-      onClose={() => setConfirm(null)}
-      onConfirm={removeRecord}
-    />}
   </>;
 }
 
@@ -294,7 +300,8 @@ function AcademicFormModal({ tab, editing, busy, sessions, classes, branches, se
     timetable: [sessionField, { name: "sectionId", label: "Section", type: "select", required: true, options: options.sectionId }, { name: "classSubjectId", label: "Assigned subject (teacher required)", type: "select", required: true, options: options.classSubjectId }, { name: "dayOfWeek", label: "Day (1 Monday – 7 Sunday)", type: "number", min: 1, max: 7, required: true }, { name: "periodNumber", label: "Period number", type: "number", min: 1, max: 20, required: true }, { name: "startsAt", label: "Starts at", type: "time", required: true }, { name: "endsAt", label: "Ends at", type: "time", required: true }, { name: "room", label: "Room" }]
   }[tab];
   const title = isEditing ? (tab === "assignments" ? "Update class subject" : "Edit class") : `Add ${tabLabel(tab).replace(/s$/, "").toLowerCase()}`;
-  return <Modal title={title} size={tab === "assignments" ? "lg" : undefined} onClose={onClose}><form className="form-stack modal-form" onSubmit={onSubmit}><div className="form-grid">{fields.map((field) => <label key={field.name}>{field.label}{field.required && <span className="required"> *</span>}
+  const [dirty, setDirty] = useState(false);
+  return <Modal title={title} size={tab === "assignments" ? "lg" : undefined} onClose={onClose} dirty={dirty && !busy} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={onSubmit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}><div className="form-grid">{fields.map((field) => <label key={field.name}>{field.label}{field.required && <span className="required"> *</span>}
     {field.type === "select" ? <>
       <select name={field.name} defaultValue={field.defaultValue || ""} required={field.required} disabled={field.disabled || field.locked}>
         <option value="" disabled>{field.disabled ? "Unavailable" : "Select…"}</option>
@@ -307,5 +314,5 @@ function AcademicFormModal({ tab, editing, busy, sessions, classes, branches, se
   {tab === "assignments" && !isEditing && <small className="field-hint">A subject must have a teacher assigned before it can be added to the timetable. You can leave the teacher blank and assign one later.</small>}
   {tab === "assignments" && isEditing && <small className="field-hint">Re-submitting updates this class subject. Clearing the teacher is not supported by the API yet — the existing teacher is kept if the field is left blank.</small>}
   {tab === "timetable" && !options.classSubjectId.length && <small className="field-hint">No teacher-assigned class subjects are available for this session. Assign a subject and teacher first.</small>}
-  <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || (tab === "timetable" && !options.classSubjectId.length)}>{busy ? "Saving…" : isEditing ? "Save changes" : "Create record"}</button></div></form></Modal>;
+  <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || (tab === "timetable" && !options.classSubjectId.length)}>{busy ? "Saving…" : isEditing ? "Save changes" : "Create record"}</button></div></form></Modal>;
 }

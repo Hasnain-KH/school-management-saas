@@ -13,7 +13,7 @@ export default function ToastViewport({ toasts, onDismiss, onPause, onResume }) 
       const duration = toast.duration > 0 && !toast.persistent ? (toast.remaining ?? toast.duration) : 0;
       return <div
         key={toast.id}
-        className={`toast toast-${toast.type}`}
+        className={`toast toast-${toast.type}${toast.exiting ? " toast-exiting" : ""}`}
         role={toast.type === "error" ? "alert" : "status"}
         aria-atomic="true"
         onMouseEnter={() => onPause(toast.id)}

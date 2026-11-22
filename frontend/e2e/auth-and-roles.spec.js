@@ -36,6 +36,14 @@ async function configureRoleApi(page, identity, overrides = {}) {
   });
 }
 
+// Guest auth pages still bootstrap identity. Keep those checks local so a slow
+// or unavailable backend cannot leave the form behind the loading state.
+async function mockGuestBootstrap(page) {
+  await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
+  await page.route(`${api}/auth/me`, (route) => respond(route, 401, null, "Authentication is required"));
+  await page.route(`${api}/auth/refresh`, (route) => respond(route, 401, null, "Session expired"));
+}
+
 async function signInAs(page, identity, overrides) {
   await configureRoleApi(page, identity, overrides);
   await page.goto("/login");
@@ -100,6 +108,7 @@ test("principal navigation only links to pages the role is permitted to open", a
 test("login displays API rejection without storing a browser-readable token", async ({ page }) => {
   await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
   await page.route(`${api}/auth/login`, (route) => respond(route, 401, null, "Invalid credentials"));
+  await mockGuestBootstrap(page);
   await page.goto("/login");
   await page.getByLabel("Email address").fill("user@example.test");
   await page.getByLabel("Password").fill("wrong-password");
@@ -112,6 +121,7 @@ test("login displays API rejection without storing a browser-readable token", as
 test("school registration surfaces API provisioning errors", async ({ page }) => {
   await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
   await page.route(`${api}/auth/register`, (route) => respond(route, 503, null, "School registration is temporarily unavailable"));
+  await mockGuestBootstrap(page);
   await page.goto("/register");
   await page.getByLabel("School name").fill("Test Academy");
   await page.getByLabel("Administrator name").fill("School Owner");
@@ -124,6 +134,7 @@ test("school registration surfaces API provisioning errors", async ({ page }) =>
 test("password recovery presents generic success feedback", async ({ page }) => {
   await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
   await page.route(`${api}/auth/password-recovery`, (route) => respond(route, 200, {}));
+  await mockGuestBootstrap(page);
   await page.goto("/forgot-password");
   await page.getByLabel("Email address").fill("owner@example.test");
   await page.getByRole("button", { name: "Send recovery instructions" }).click();
@@ -132,6 +143,7 @@ test("password recovery presents generic success feedback", async ({ page }) => 
 
 test("login remains usable at a narrow mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await mockGuestBootstrap(page);
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -157,6 +169,9 @@ test("shared dialogs focus the form, trap keyboard navigation, and restore focus
 });
 
 test("school workspace stays within a narrow mobile viewport", async ({ page }) => {
+  // Navigating eight lazily-loaded workspaces at 390px is slower than the
+  // project default when the full suite runs serially.
+  test.setTimeout(60_000);
   const admin = roles.find(({ role }) => role === "school_admin");
   await signInAs(page, admin);
   await page.setViewportSize({ width: 390, height: 844 });

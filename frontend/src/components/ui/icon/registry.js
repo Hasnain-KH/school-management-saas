@@ -12,7 +12,7 @@ import {
   Paperclip, Pencil, Phone, Plus, Presentation, Printer, Receipt, RefreshCw,
   RotateCcw, Save, School, Search, Send, Settings, Settings2, Shield, ShieldCheck,
   SlidersHorizontal, Trash2, TrendingDown, TrendingUp, Trophy, Upload, User,
-  UserCircle, UserPlus, UserRound, Users, UsersRound, Wallet, X, XCircle
+  UserCircle, UserPlus, UserRound, Users, UsersRound, Wallet, WifiOff, X, XCircle
 } from "lucide-react";
 
 /**
@@ -132,6 +132,7 @@ export const ICON_REGISTRY = Object.freeze({
   location: MapPin,
 
   // Migration-compatible entries that preserve prior visual meanings.
+  offline: WifiOff,
   activity: Activity,
   archive: Archive,
   receive: ArrowDownToLine,

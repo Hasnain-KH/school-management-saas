@@ -7,6 +7,7 @@
  * API and its single host in App.jsx.
  */
 export const TOAST_VISIBLE_LIMIT = 3;
+export const TOAST_EXIT_MS = 160;
 export const TOAST_DURATIONS = Object.freeze({
   success: 4000,
   info: 5000,
@@ -18,6 +19,7 @@ export const TOAST_DURATIONS = Object.freeze({
 let state = { dialogs: [], toasts: [], nextId: 1 };
 const listeners = new Set();
 const timers = new Map();
+const exitTimers = new Map();
 
 const emit = () => {
   for (const listener of listeners) listener();
@@ -46,7 +48,7 @@ const syncToastTimers = () => {
     if (!visibleIds.has(id)) clearToastTimer(id);
   }
   for (const toast of visible) {
-    if (toast.duration <= 0 || toast.paused || timers.has(toast.id)) continue;
+    if (toast.exiting || toast.duration <= 0 || toast.paused || timers.has(toast.id)) continue;
     const timeout = setTimeout(() => dismissToast(toast.id), toast.remaining ?? toast.duration);
     timers.set(toast.id, { timeout, startedAt: Date.now() });
   }
@@ -64,8 +66,20 @@ const updateToast = (id, patch) => {
 
 const dismissToast = (id) => {
   clearToastTimer(id);
-  state = { ...state, toasts: state.toasts.filter((toast) => toast.id !== id) };
+  const toast = state.toasts.find((item) => item.id === id);
+  if (!toast || toast.exiting) return;
+  state = {
+    ...state,
+    toasts: state.toasts.map((item) => item.id === id ? { ...item, exiting: true, paused: true } : item)
+  };
   emit();
+  const timeout = setTimeout(() => {
+    exitTimers.delete(id);
+    state = { ...state, toasts: state.toasts.filter((item) => item.id !== id) };
+    emit();
+    syncToastTimers();
+  }, TOAST_EXIT_MS);
+  exitTimers.set(id, timeout);
   syncToastTimers();
 };
 
@@ -75,7 +89,7 @@ const pushToast = (config = {}) => {
   const type = TOAST_DURATIONS[config.type] !== undefined ? config.type : "info";
   const duration = config.duration !== undefined ? Number(config.duration) : TOAST_DURATIONS[type];
   const key = toastKey({ ...config, type });
-  const existing = state.toasts.find((toast) => toast.key === key);
+  const existing = state.toasts.find((toast) => toast.key === key && !toast.exiting);
 
   if (existing) {
     clearToastTimer(existing.id);
@@ -109,10 +123,31 @@ const pushToast = (config = {}) => {
   return id;
 };
 
+/** Immediately remove toasts (no exit delay), used when replacing same-role feedback. */
+const clearToasts = (types) => {
+  const wanted = Array.isArray(types) ? new Set(types) : types ? new Set([types]) : null;
+  const ids = state.toasts
+    .filter((toast) => !wanted || wanted.has(toast.type))
+    .map((toast) => toast.id);
+  if (!ids.length) return;
+  const idSet = new Set(ids);
+  for (const id of ids) {
+    clearToastTimer(id);
+    const timer = exitTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      exitTimers.delete(id);
+    }
+  }
+  state = { ...state, toasts: state.toasts.filter((toast) => !idSet.has(toast.id)) };
+  emit();
+  syncToastTimers();
+};
+
 const pauseToast = (id) => {
   const timer = timers.get(id);
   const toast = state.toasts.find((item) => item.id === id);
-  if (!toast) return;
+  if (!toast || toast.exiting) return;
   const elapsed = timer ? Date.now() - timer.startedAt : 0;
   clearToastTimer(id);
   updateToast(id, {
@@ -123,7 +158,7 @@ const pauseToast = (id) => {
 
 const resumeToast = (id) => {
   const toast = state.toasts.find((item) => item.id === id);
-  if (!toast || !toast.paused) return;
+  if (!toast || toast.exiting || !toast.paused) return;
   updateToast(id, { paused: false });
 };
 
@@ -212,6 +247,7 @@ export const appFeedback = {
   },
   toast: toastApi,
   dismissToast,
+  clearToasts,
   pauseToast,
   resumeToast,
   closeDialog
@@ -220,6 +256,8 @@ export const appFeedback = {
 /** Test-only reset. Never used by application code. */
 export function __resetFeedbackForTests() {
   for (const id of [...timers.keys()]) clearToastTimer(id);
+  for (const id of [...exitTimers.keys()]) clearTimeout(exitTimers.get(id));
+  exitTimers.clear();
   state = { dialogs: [], toasts: [], nextId: 1 };
   emit();
 }

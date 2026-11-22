@@ -8,6 +8,7 @@ import {
   isVerificationRequiredError,
   validateNewPassword
 } from "../utils/email-verification.js";
+import { notify } from "../components/feedback/appFeedback.js";
 
 export default function AuthPage({ mode }) {
   const isRegister = mode === "register";
@@ -17,15 +18,14 @@ export default function AuthPage({ mode }) {
   const [searchParams] = useSearchParams();
   const { signIn, register } = useAuth();
   const navigate = useNavigate();
-  const [error, setError] = useState("");
-  const [feedbackType, setFeedbackType] = useState("error");
+  const [validationError, setValidationError] = useState("");
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
-    setError("");
-    setFeedbackType("error");
+    if (busy) return;
+    setValidationError("");
     setVerificationRequired(false);
     setBusy(true);
     const values = Object.fromEntries(
@@ -35,40 +35,43 @@ export default function AuthPage({ mode }) {
       if (isResend) {
         const { endpoint, body } = buildResendVerificationPayload(values);
         await post(endpoint, body);
-        setError("If the account is eligible, a new verification email is on its way. Any earlier verification link has now been invalidated.");
-        setFeedbackType("success");
+        notify.success("Verification email sent", { description: "If the account is eligible, a new verification email is on its way. Any earlier verification link has now been invalidated." });
         return;
       } else if (isRecovery) {
         await post("/auth/password-recovery", values);
-        setError("If the account exists and delivery is configured, password recovery instructions will be sent.");
-        setFeedbackType("success");
+        notify.success("Check your email", { description: "If the account exists and delivery is configured, password recovery instructions will be sent." });
         return;
       } else if (isReset) {
         const passwordError = validateNewPassword(values.password, values.confirmPassword);
         if (passwordError) {
-          setError(passwordError);
+          setValidationError(passwordError);
           return;
         }
         await post("/auth/password-reset", { token: values.token, password: values.password });
+        notify.success("Password reset complete", { description: "You can now sign in with your new password." });
         navigate("/login", { replace: true });
         return;
       } else if (isRegister) {
         const result = await register(values);
         if (!result.authenticated) {
-          setError(result.emailVerificationRequired
-            ? "Your school is registered. Check your email and verify the address before signing in."
-            : result.message || "Your school is registered. Sign in after email verification is available.");
-          setFeedbackType("success");
+          notify.success("Your school is registered", {
+            description: result.emailVerificationRequired
+              ? "Check your email and verify the address before signing in."
+              : "Sign in after email verification is available."
+          });
           return;
         }
+        notify.success("School workspace created");
       } else {
         await signIn(values);
+        notify.success("Signed in successfully");
       }
       navigate("/", { replace: true });
     } catch (reason) {
       if (isVerificationRequiredError(reason)) {
+        // The inline status link below is the single verification surface;
+        // a toast here would create a second role=status for the same outcome.
         setVerificationRequired(true);
-        setError("Your email address must be verified before you can sign in.");
         return;
       }
       if (isReset && reason instanceof ApiError && reason.status === 400) {
@@ -78,12 +81,23 @@ export default function AuthPage({ mode }) {
         const passwordIssue = reason.errors?.find(({ path }) =>
           (Array.isArray(path) ? path : [path]).includes("password")
         );
-        setError(passwordIssue
-          ? "Choose a password that meets the requirements and try again."
-          : "This reset link is invalid, expired, or has already been used. Request a new password reset email.");
+        notify.error(reason, passwordIssue
+          ? { title: "Choose a password that meets the requirements" }
+          : { title: "This reset link is invalid, expired, or has already been used", description: "Request a new password reset email and try again." });
         return;
       }
-      setError(reason instanceof ApiError ? reason.message : "The service could not be reached. Check the API connection and try again.");
+      if (!isReset && reason instanceof ApiError && reason.status === 401) {
+        notify.error(reason, { title: "Invalid credentials" });
+        return;
+      }
+      if (isRegister && reason instanceof ApiError && reason.status >= 500) {
+        notify.error(reason, {
+          title: "School registration could not be completed",
+          description: "School registration is temporarily unavailable. Please try again later."
+        });
+        return;
+      }
+      notify.error(reason);
     } finally {
       setBusy(false);
     }
@@ -113,7 +127,7 @@ export default function AuthPage({ mode }) {
         </>}
         {!isRecovery && !isResend && <label>{isReset ? "New password" : "Password"}<input name="password" type="password" required minLength={isRegister || isReset ? 12 : 1} maxLength="72" autoComplete={isRegister || isReset ? "new-password" : "current-password"} placeholder={isRegister || isReset ? "At least 12 characters" : "Enter your password"} /></label>}
         {isReset && <label>Confirm new password<input name="confirmPassword" type="password" required minLength="12" maxLength="72" autoComplete="new-password" placeholder="Re-enter your new password" /></label>}
-        {error && <div className={feedbackType === "success" ? "auth-message" : "form-error"} role={feedbackType === "success" ? "status" : "alert"}>{error}</div>}
+        {validationError && <div className="form-error" role="alert">{validationError}</div>}
         {verificationRequired && <div className="auth-message" role="status"><Mail size={15} /> Need a new link? <Link to="/resend-verification">Resend the verification email</Link>.</div>}
         {!isRegister && !isRecovery && !isReset && !isResend && <div className="forgot-link"><Link to="/forgot-password">Forgot password?</Link></div>}
         <button className="button button-primary button-wide" disabled={busy}>{busy ? "Please wait…" : isRegister ? "Create school workspace" : isRecovery ? "Send recovery instructions" : isReset ? "Reset password" : isResend ? "Send verification email" : "Sign in"}<ArrowRight size={17} /></button>

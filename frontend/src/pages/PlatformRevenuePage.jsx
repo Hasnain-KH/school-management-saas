@@ -3,7 +3,8 @@ import { CircleDollarSign, Plus } from "../components/ui/icon/icons.jsx";
 import { get, post, queryString } from "../api/client.js";
 import Modal from "../components/Modal.jsx";
 import ModuleHeader from "../components/ModuleHeader.jsx";
-import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import { notify } from "../components/feedback/appFeedback.js";
+import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
 
@@ -30,6 +31,7 @@ function RecordPaymentModal({ busy, onClose, onSubmit }) {
   const [plans, setPlans] = useState([]);
   const [planId, setPlanId] = useState("");
   const [error, setError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -55,24 +57,21 @@ function RecordPaymentModal({ busy, onClose, onSubmit }) {
       body.amountMinor = Number(values.amountMinor);
       body.currency = String(values.currency || "").toUpperCase();
     }
-    try {
-      await onSubmit(values.schoolId, body);
-    } catch (reason) {
-      setError(reason.message || "Could not record the payment.");
-    }
+    await onSubmit(values.schoolId, body);
+    setDirty(false);
   };
 
-  return <Modal title="Record a payment" onClose={onClose}><form className="form-stack modal-form" onSubmit={submit}>
+  return <Modal title="Record a payment" onClose={onClose} dirty={dirty && !busy} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={submit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}>
     {error && <div className="form-error" role="alert">{error}</div>}
     <label>School<select name="schoolId" required defaultValue=""><option value="" disabled>Select a school</option>{schools.map((school) => <option key={school._id} value={school._id}>{school.name} · {school.slug}</option>)}</select></label>
-    <label>Plan <span className="optional">(optional)</span><select name="planId" value={planId} onChange={(event) => setPlanId(event.target.value)}><option value="">Custom amount (no plan)</option>{plans.map((plan) => <option key={plan._id} value={plan._id}>{plan.name} · {formatMoney(plan.priceMinor, plan.currency)} / {plan.billingInterval}</option>)}</select></label>
+    <label>Plan <span className="optional">(optional)</span><select name="planId" value={planId} onChange={(event) => { setPlanId(event.target.value); setDirty(true); }}><option value="">Custom amount (no plan)</option>{plans.map((plan) => <option key={plan._id} value={plan._id}>{plan.name} · {formatMoney(plan.priceMinor, plan.currency)} / {plan.billingInterval}</option>)}</select></label>
     {!planId && <div className="form-grid">
       <label>Amount (minor units)<input name="amountMinor" type="number" min="0" required /></label>
       <label>Currency<input name="currency" required minLength={3} maxLength={3} placeholder="PKR" /></label>
     </div>}
     <label>Notes <span className="optional">(optional)</span><input name="notes" maxLength={500} placeholder="Bank transfer reference" /></label>
     <label className="inline-toggle"><input type="checkbox" name="applySubscription" />Activate or extend this school's subscription</label>
-    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div>
+    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div>
   </form></Modal>;
 }
 
@@ -85,7 +84,6 @@ export default function PlatformRevenuePage() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
 
@@ -113,9 +111,11 @@ export default function PlatformRevenuePage() {
     setBusy(true);
     try {
       await post(`/platform/schools/${schoolId}/payments`, body);
-      setNotice({ type: "success", message: "Payment recorded." });
+      notify.success("Payment recorded.");
       setRecording(false);
       if (tab === "revenue") await load(); else { setPage(1); await load(); }
+    } catch (reason) {
+      notify.error(reason, { title: "Could not record payment" });
     } finally {
       setBusy(false);
     }
@@ -123,7 +123,6 @@ export default function PlatformRevenuePage() {
 
   return <>
     <ModuleHeader kicker="PLATFORM ADMINISTRATION" title="Revenue" description="Recorded subscription payments and platform revenue." icon={CircleDollarSign} action={<button className="button button-primary" onClick={() => setRecording(true)}><Plus size={16} />Record payment</button>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <div className="tabs platform-tabs" role="group" aria-label="Revenue view">
       <button type="button" aria-pressed={tab === "revenue"} className={tab === "revenue" ? "tab active-tab" : "tab"} onClick={() => setTab("revenue")}>Summary</button>
       <button type="button" aria-pressed={tab === "payments"} className={tab === "payments" ? "tab active-tab" : "tab"} onClick={() => setTab("payments")}>Payments</button>
@@ -132,14 +131,14 @@ export default function PlatformRevenuePage() {
     {loading ? <section className="content-card"><SkeletonRows /></section>
       : error ? <section className="content-card"><ErrorState error={{ message: error }} onRetry={load} /></section>
         : tab === "revenue" ? <RevenueSummary report={report} />
-          : <section className="content-card table-card">
+          : <section className="content-card table-card tab-panel" key="payments">
             <div className="table-toolbar">
               <div><strong>Payments</strong><span>{pagination?.total ?? payments.length} records</span></div>
               <label className="inline-toggle">Status<select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">All statuses</option>{["pending", "paid", "failed", "refunded"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label>
             </div>
             {payments.length ? <>
               <div className="table-scroll"><table><thead><tr><th>Recorded</th><th>School</th><th>Plan</th><th>Amount</th><th>Status</th><th>Method</th></tr></thead>
-                <tbody>{payments.map((payment) => <tr key={payment.id}>
+                <tbody className="motion-stagger">{payments.map((payment) => <tr key={payment.id}>
                   <td>{formatDate(payment.paidAt || payment.createdAt)}</td>
                   <td><code>{payment.schoolId?.slice(-6)}</code></td>
                   <td>{payment.planCode || "—"}</td>

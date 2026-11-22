@@ -7,9 +7,39 @@ import { MoreHorizontal } from "./ui/icon/icons.jsx";
  */
 export default function RowMenu({ label = "Row actions", items = [] }) {
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [position, setPosition] = useState(null);
   const buttonRef = useRef(null);
   const panelRef = useRef(null);
+  const closeTimer = useRef(null);
+
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setClosing(false);
+  };
+
+  const requestClose = () => {
+    if (closeTimer.current) return;
+    setClosing(true);
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      setOpen(false);
+      setClosing(false);
+    }, 120);
+  };
+
+  const toggle = () => {
+    if (closeTimer.current) { cancelClose(); return; }
+    if (open) { requestClose(); return; }
+    setOpen(true);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -25,9 +55,9 @@ export default function RowMenu({ label = "Row actions", items = [] }) {
     place();
     const onPointer = (event) => {
       if (panelRef.current?.contains(event.target) || buttonRef.current?.contains(event.target)) return;
-      setOpen(false);
+      requestClose();
     };
-    const onKey = (event) => { if (event.key === "Escape") setOpen(false); };
+    const onKey = (event) => { if (event.key === "Escape") requestClose(); };
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
     document.addEventListener("mousedown", onPointer);
@@ -41,9 +71,9 @@ export default function RowMenu({ label = "Row actions", items = [] }) {
   }, [open, items.length]);
 
   return <>
-    <button ref={buttonRef} type="button" className="icon-button" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} aria-hidden="true" /></button>
-    {open && position && <div ref={panelRef} className="row-menu-panel" role="menu" style={{ position: "fixed", top: position.top, left: position.left, right: "auto", width: position.width }}>
-      {items.map((item) => <button key={item.label} type="button" role="menuitem" className={`menu-item${item.danger ? " menu-item-danger" : ""}`} onClick={() => { setOpen(false); item.onSelect(); }}>{item.icon}<span>{item.label}</span></button>)}
+    <button ref={buttonRef} type="button" className="icon-button" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={toggle}><MoreHorizontal size={16} aria-hidden="true" /></button>
+    {open && position && <div ref={panelRef} className={closing ? "row-menu-panel row-menu-panel-closing" : "row-menu-panel"} role="menu" style={{ position: "fixed", top: position.top, left: position.left, right: "auto", width: position.width }}>
+      {items.map((item) => <button key={item.label} type="button" role="menuitem" className={`menu-item${item.danger ? " menu-item-danger" : ""}`} onClick={() => { requestClose(); item.onSelect(); }}>{item.icon}<span>{item.label}</span></button>)}
     </div>}
   </>;
 }

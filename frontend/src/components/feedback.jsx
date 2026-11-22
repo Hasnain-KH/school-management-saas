@@ -41,5 +41,24 @@ export function SkeletonRows({ rows = 5 }) {
   )}</div>;
 }
 
+export function SkeletonCards({ count = 4 }) {
+  return <div className="metric-grid motion-stagger" role="status" aria-label="Loading dashboard metrics">
+    {Array.from({ length: count }, (_, index) => <div className="metric-card metric-card-skeleton" key={index} aria-hidden="true">
+      <div className="skeleton-block skeleton-icon" />
+      <div className="skeleton-block skeleton-line" />
+      <div className="skeleton-block skeleton-value" />
+      <div className="skeleton-block skeleton-line skeleton-line-short" />
+    </div>)}
+  </div>;
+}
+
+export function PageSkeleton() {
+  return <div className="page-skeleton" role="status" aria-label="Loading page content">
+    <div className="skeleton-block skeleton-heading" />
+    <div className="skeleton-block skeleton-line" />
+    <div className="content-card"><SkeletonRows rows={4} /></div>
+  </div>;
+}
+
 // Kept for callers that want a lightweight inline search affordance.
 export const SearchIcon = Search;

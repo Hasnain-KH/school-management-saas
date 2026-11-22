@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { BellRing, CheckCheck } from "../components/ui/icon/icons.jsx";
 import { get, post, queryString } from "../api/client.js";
 import ModuleHeader from "../components/ModuleHeader.jsx";
-import { EmptyState, ErrorState, LoadingState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import { notify } from "../components/feedback/appFeedback.js";
+import { EmptyState, ErrorState, LoadingState, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
 
@@ -28,7 +29,6 @@ export default function NotificationsPage() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -55,7 +55,7 @@ export default function NotificationsPage() {
       setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, read: true, readAt: new Date().toISOString() } : entry));
       window.dispatchEvent(new Event("schoolflow:notifications-changed"));
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Could not mark notification as read" });
     } finally {
       setBusy(false);
     }
@@ -65,11 +65,11 @@ export default function NotificationsPage() {
     setBusy(true);
     try {
       const result = await post("/notifications/read-all", {});
-      setNotice({ type: "success", message: `Marked ${result?.updated ?? 0} notification${result?.updated === 1 ? "" : "s"} as read.` });
+      notify.success(`Marked ${result?.updated ?? 0} notification${result?.updated === 1 ? "" : "s"} as read.`);
       window.dispatchEvent(new Event("schoolflow:notifications-changed"));
       await load();
     } catch (reason) {
-      setNotice({ type: "error", message: reason.message });
+      notify.error(reason, { title: "Could not mark all notifications as read" });
     } finally {
       setBusy(false);
     }
@@ -79,7 +79,6 @@ export default function NotificationsPage() {
 
   return <>
     <ModuleHeader title="Notifications" description="School updates, published results, and reminders addressed to you." icon={BellRing} action={<button className="button button-outline" disabled={busy || !unreadOnPage} onClick={markAllRead}><CheckCheck size={16} />Mark all read</button>} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">
         <div><strong>Your notifications</strong><span>{pagination?.total ?? items.length} records</span></div>

@@ -5,6 +5,7 @@ import PortalShell from "./components/PortalShell.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { LoadingState } from "./components/feedback.jsx";
 import FeedbackHost from "./components/feedback/FeedbackHost.jsx";
+import NetworkStatus from "./components/feedback/NetworkStatus.jsx";
 const AuthPage = lazy(() => import("./pages/AuthPage.jsx"));
 const VerifyEmailPage = lazy(() => import("./pages/VerifyEmailPage.jsx"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage.jsx"));
@@ -40,7 +41,7 @@ function WorkspaceRoute({ page, roles = adminRoles }) {
 }
 
 export default function App() {
-  return <ErrorBoundary><><FeedbackHost /><Suspense fallback={<div className="auth-loading"><LoadingState /></div>}><Routes>
+  return <ErrorBoundary><><NetworkStatus /><FeedbackHost /><Suspense fallback={<div className="auth-loading"><LoadingState /></div>}><Routes>
     <Route path="/login" element={<Guest><AuthPage mode="login" /></Guest>} />
     <Route path="/register" element={<Guest><AuthPage mode="register" /></Guest>} />
     <Route path="/forgot-password" element={<Guest><AuthPage mode="recovery" /></Guest>} />

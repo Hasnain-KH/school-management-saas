@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Receipt } from "../components/ui/icon/icons.jsx";
 import { get, queryString } from "../api/client.js";
 import ModuleHeader from "../components/ModuleHeader.jsx";
-import { EmptyState, ErrorState, Notice, SkeletonRows } from "../components/feedback.jsx";
+import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback.jsx";
 
 const PAGE_SIZE = 25;
 
@@ -30,7 +30,6 @@ export default function BillingPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,7 +49,6 @@ export default function BillingPage() {
 
   return <>
     <ModuleHeader title="Billing history" description="Subscription payments recorded for your school." icon={Receipt} />
-    <Notice notice={notice} onClose={() => setNotice(null)} />
     <section className="content-card table-card">
       <div className="table-toolbar">
         <div><strong>Payments</strong><span>{pagination?.total ?? items.length} records</span></div>

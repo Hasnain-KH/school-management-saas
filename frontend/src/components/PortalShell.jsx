@@ -8,6 +8,8 @@ import {
 import { useAuth } from "../auth/AuthProvider.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import SchoolLogo from "./SchoolLogo.jsx";
+import { notify } from "../components/feedback/appFeedback.js";
+import { confirmUnsavedNavigation } from "../components/feedback/unsavedChanges.js";
 
 const roleGroups = {
   platform_super_admin: [
@@ -74,7 +76,10 @@ export default function PortalShell() {
     try { window.localStorage.setItem(COLLAPSE_KEY, collapsed ? "true" : "false"); } catch { /* storage may be unavailable */ }
   }, [collapsed]);
 
-  useEffect(() => { setMenuOpen(false); setAccountOpen(false); }, [location.pathname]);
+  // NavLink clicks close the mobile menu immediately. Do not also close it in a
+  // passive route effect: under load that effect can run after the user has
+  // reopened the menu for the next navigation, leaving the links off-screen.
+  useEffect(() => { setAccountOpen(false); }, [location.pathname]);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -86,11 +91,18 @@ export default function PortalShell() {
   }, [accountOpen]);
 
   const logout = async () => {
-    await signOut();
-    navigate("/login", { replace: true });
+    try {
+      await signOut();
+      notify.success("Signed out successfully");
+    } catch (error) {
+      notify.error(error, { title: "Sign out failed", fallback: "You were signed out locally. Please sign in again." });
+    } finally {
+      navigate("/login", { replace: true });
+    }
   };
 
   return <div className="app-shell">
+    <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}>
       <div className="brand">
         <SchoolLogo className="brand-mark" size={19} />
@@ -105,7 +117,10 @@ export default function PortalShell() {
       <nav className="sidebar-nav" aria-label="Main navigation">
         {groups.map(([group, links]) => <section key={group} className="nav-group">
           <div className="nav-group-title">{group}</div>
-          {links.map(([to, label, Icon]) => <NavLink key={to} to={`/${to}`} end={to === ""} onClick={() => setMenuOpen(false)} data-label={label} title={collapsed ? label : undefined} className={({ isActive }) => `nav-link ${isActive ? "nav-link-active" : ""}`}><Icon size={18} aria-hidden="true" /><span>{label}</span></NavLink>)}
+          {links.map(([to, label, Icon]) => <NavLink key={to} to={`/${to}`} end={to === ""} onClick={(event) => {
+            if (!confirmUnsavedNavigation()) { event.preventDefault(); return; }
+            setMenuOpen(false);
+          }} data-label={label} data-unsaved-guarded="true" title={collapsed ? label : undefined} className={({ isActive }) => `nav-link ${isActive ? "nav-link-active" : ""}`}><Icon size={18} aria-hidden="true" /><span>{label}</span></NavLink>)}
         </section>)}
       </nav>
       <div className="sidebar-footer">
@@ -115,7 +130,7 @@ export default function PortalShell() {
       </div>
     </aside>
     {menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
-    <main className={`main-area ${collapsed ? "main-area-wide" : ""}`}>
+    <main id="main-content" tabIndex={-1} className={`main-area ${collapsed ? "main-area-wide" : ""}`}>
       <header className="topbar">
         <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={21} /></button>
         <div className="breadcrumbs"><span>{school?.name || "SchoolFlow"}</span><span className="crumb-slash">/</span><strong>{currentLabel}</strong></div>
@@ -126,14 +141,14 @@ export default function PortalShell() {
             <button className="topbar-avatar" onClick={() => setAccountOpen((value) => !value)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><SchoolLogo size={16} fallback={userInitial} /></button>
             {accountOpen && <div className="account-menu" role="menu">
               <header><strong>{user?.name}</strong><small>{roleName(user?.role)}{school?.name ? ` · ${school.name}` : ""}</small></header>
-              {accountLinks(user?.role).map(([label, to, Icon]) => <button key={to} className="menu-item" role="menuitem" onClick={() => navigate(to)}><Icon size={16} aria-hidden="true" />{label}</button>)}
+              {accountLinks(user?.role).map(([label, to, Icon]) => <button key={to} className="menu-item" role="menuitem" onClick={() => { if (!confirmUnsavedNavigation()) return; navigate(to); }}><Icon size={16} aria-hidden="true" />{label}</button>)}
               <div className="menu-sep" />
               <button className="menu-item menu-item-danger" role="menuitem" onClick={logout}><LogOut size={16} aria-hidden="true" />Sign out</button>
             </div>}
           </div>
         </div>
       </header>
-      <div className="page-frame"><Outlet /></div>
+      <div className="page-frame" key={location.pathname}><Outlet /></div>
     </main>
   </div>;
 }

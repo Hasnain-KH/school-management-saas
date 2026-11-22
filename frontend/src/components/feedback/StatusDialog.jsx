@@ -39,7 +39,7 @@ export default function StatusDialog({ dialog, onClose }) {
   return <Modal
     title={dialog.title || "Update complete"}
     onClose={cancel}
-    role={isConfirm ? "alertdialog" : "dialog"}
+    role="dialog"
     className="modal-card-confirm"
     ariaDescribedBy={descriptionId}
     hideHeader

@@ -7,7 +7,7 @@ import {
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { get, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import { EmptyState, ErrorState, LoadingState } from "../components/feedback.jsx";
+import { EmptyState, ErrorState, LoadingState, SkeletonCards, SkeletonRows } from "../components/feedback.jsx";
 import usePrefersReducedMotion from "../utils/usePrefersReducedMotion.js";
 
 const number = (value) => new Intl.NumberFormat().format(value || 0);
@@ -18,6 +18,30 @@ const money = (minor, currency = "USD") => {
 const total = (list = []) => list.reduce((sum, item) => sum + (item.count || 0), 0);
 const monthKey = () => new Date().toISOString().slice(0, 7);
 const greeting = () => { const hour = new Date().getHours(); return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening"; };
+
+/** Count a numeric headline value up once; reduced motion and non-numeric values render immediately. */
+function useCountUp(target, enabled) {
+  const [display, setDisplay] = useState(enabled ? 0 : (target || 0));
+
+  useEffect(() => {
+    if (!enabled || !Number.isFinite(target) || typeof requestAnimationFrame !== "function") {
+      setDisplay(target || 0);
+      return undefined;
+    }
+    let frame;
+    let startedAt;
+    const tick = (now) => {
+      if (startedAt === undefined) startedAt = now;
+      const progress = Math.min(1, (now - startedAt) / 600);
+      setDisplay(Math.round(target * (1 - (1 - progress) ** 3)));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [target, enabled]);
+
+  return display;
+}
 
 const QUICK_ACTIONS = {
   school_admin: [["Add a student", "/students", GraduationCap], ["Take attendance", "/attendance", ClipboardList], ["Fees & finance", "/finance", CircleDollarSign], ["Reports", "/reports", Activity]],
@@ -69,7 +93,7 @@ export default function DashboardPage() {
   const isPlatform = user.role === "platform_super_admin";
   const introTitle = isParent ? `Welcome, ${user.name.split(" ")[0]}` : `Good ${greeting()}, ${user.name.split(" ")[0]}`;
 
-  if (busy) return <><PageIntro title={introTitle} subtitle={school?.name || "Your SchoolFlow workspace"} /><LoadingState /></>;
+  if (busy) return <><PageIntro title={introTitle} subtitle={school?.name || "Your SchoolFlow workspace"} /><SkeletonCards count={user?.role === "parent" ? 2 : 4} /><section className="content-card"><SkeletonRows rows={4} /></section></>;
   if (error) return <><PageIntro title={introTitle} subtitle={school?.name || "Your SchoolFlow workspace"} /><ErrorState error={{ message: error }} onRetry={load} /></>;
 
   if (isParent) return <ParentDashboard user={user} school={school} children={children} navigate={navigate} />;
@@ -82,7 +106,7 @@ function ParentDashboard({ user, school, children, navigate }) {
   return <div className="dashboard-page layout-parent">
     <PageIntro title={`Welcome, ${user.name.split(" ")[0]}`} subtitle="A clear view of your family’s school life." eyebrow="FAMILY WORKSPACE" icon={Heart} />
     <div className="metric-grid metric-grid--dashboard">
-      <Metric icon={GraduationCap} label="Linked students" value={number(children.length)} detail={children.length === 1 ? "1 child linked to your account" : "Children linked to your account"} tone="blue" featured />
+      <Metric icon={GraduationCap} label="Linked students" value={number(children.length)} count={children.length} format={number} detail={children.length === 1 ? "1 child linked to your account" : "Children linked to your account"} tone="blue" featured />
       <Metric icon={BookOpenCheck} label="School" value={school?.name || "—"} detail="Your verified school workspace" tone="violet" />
     </div>
     <section className="content-card section-card panel-card">
@@ -106,10 +130,10 @@ function PlatformDashboard({ data, navigate }) {
   return <div className="dashboard-page layout-platform">
     <PageIntro title="Platform overview" subtitle="Manage the SchoolFlow subscription catalog and school accounts." eyebrow="PLATFORM CONTROL CENTER" icon={Building2} action={<button className="button button-primary" onClick={() => navigate("/platform")}>Manage schools <ArrowUpRight size={16} aria-hidden="true" /></button>} />
     <div className="metric-grid metric-grid--dashboard">
-      <Metric icon={Users} label="Customer schools" value={number(schools.length)} detail="Registered school workspaces" tone="blue" />
-      <Metric icon={ShieldCheck} label="Active schools" value={number(activeSchools)} detail="Workspaces with active access" tone="green" />
-      <Metric icon={CircleDollarSign} label="Active plans" value={number(plans.length)} detail="Plans available to assign" tone="violet" />
-      <Metric icon={Receipt} label="Gross revenue" value={primary ? money(primary.grossMinor, primary.currency) : money(0, "USD")} detail={primary ? `${number(primary.payments)} paid payments` : "No paid payments recorded yet"} tone="amber" featured />
+      <Metric icon={Users} label="Customer schools" value={number(schools.length)} count={schools.length} format={number} detail="Registered school workspaces" tone="blue" />
+      <Metric icon={ShieldCheck} label="Active schools" value={number(activeSchools)} count={activeSchools} format={number} detail="Workspaces with active access" tone="green" />
+      <Metric icon={CircleDollarSign} label="Active plans" value={number(plans.length)} count={plans.length} format={number} detail="Plans available to assign" tone="violet" />
+      <Metric icon={Receipt} label="Gross revenue" value={primary ? money(primary.grossMinor, primary.currency) : money(0, "USD")} count={primary?.grossMinor || 0} format={(amount) => money(amount, primary?.currency || "USD")} detail={primary ? `${number(primary.payments)} paid payments` : "No paid payments recorded yet"} tone="amber" featured />
     </div>
     <div className="platform-content">
       <section className="content-card table-card">
@@ -134,9 +158,9 @@ function TeacherDashboard({ user, data, schedule, navigate }) {
   return <div className="dashboard-page layout-teacher">
     <PageIntro title={`Good ${greeting()}, ${user.name.split(" ")[0]}`} subtitle="Your attendance and teaching schedule." eyebrow="TEACHING WORKSPACE" icon={ClipboardList} />
     <div className="metric-grid metric-grid--dashboard">
-      <Metric icon={CalendarDays} label="Scheduled periods" value={number(schedule.length)} detail="Across your active session" tone="blue" featured />
-      <Metric icon={ClipboardList} label="Present days" value={number(summary.present || 0)} detail={data?.attendance?.month || "Current month"} tone="green" />
-      <Metric icon={Activity} label="Absent days" value={number(summary.absent || 0)} detail={data?.attendance?.month || "Current month"} tone="amber" />
+      <Metric icon={CalendarDays} label="Scheduled periods" value={number(schedule.length)} count={schedule.length} format={number} detail="Across your active session" tone="blue" featured />
+      <Metric icon={ClipboardList} label="Present days" value={number(summary.present || 0)} count={summary.present || 0} format={number} detail={data?.attendance?.month || "Current month"} tone="green" />
+      <Metric icon={Activity} label="Absent days" value={number(summary.absent || 0)} count={summary.absent || 0} format={number} detail={data?.attendance?.month || "Current month"} tone="amber" />
       <Metric icon={BookOpenCheck} label="Active session" value={sessionName} detail="Your current academic session" tone="violet" />
     </div>
     <div className="dashboard-grid dashboard-grid--panel">
@@ -168,10 +192,10 @@ function SchoolDashboard({ user, school, data, navigate }) {
   const overdueVouchers = overdue.reduce((sum, item) => sum + item.vouchers, 0);
 
   const metrics = <div className="metric-grid metric-grid--dashboard">
-    <Metric icon={GraduationCap} label="Students" value={number(students)} detail="Across all enrollment statuses" tone="blue" featured={isPrincipal} />
-    <Metric icon={Users} label="Staff members" value={number(staff)} detail="Active school team" tone="violet" />
-    <Metric icon={CircleDollarSign} label="Collected this month" value={money(collected, currency)} detail={`${number(collections.reduce((sum, item) => sum + item.payments, 0))} recorded payments`} tone="green" featured={!isPrincipal} />
-    <Metric icon={Activity} label="Outstanding dues" value={money(due, currency)} detail={`${number(overdueVouchers)} overdue vouchers`} tone="amber" />
+    <Metric icon={GraduationCap} label="Students" value={number(students)} count={students} format={number} detail="Across all enrollment statuses" tone="blue" featured={isPrincipal} />
+    <Metric icon={Users} label="Staff members" value={number(staff)} count={staff} format={number} detail="Active school team" tone="violet" />
+    <Metric icon={CircleDollarSign} label="Collected this month" value={money(collected, currency)} count={collected} format={(amount) => money(amount, currency)} detail={`${number(collections.reduce((sum, item) => sum + item.payments, 0))} recorded payments`} tone="green" featured={!isPrincipal} />
+    <Metric icon={Activity} label="Outstanding dues" value={money(due, currency)} count={due} format={(amount) => money(amount, currency)} detail={`${number(overdueVouchers)} overdue vouchers`} tone="amber" />
   </div>;
 
   const chart = <section className="content-card chart-card panel-card">
@@ -222,10 +246,14 @@ function PageIntro({ title, subtitle, action, eyebrow = "SCHOOLFLOW WORKSPACE", 
   </div>;
 }
 
-function Metric({ icon: Icon, label, value, detail, tone, featured = false }) {
+function Metric({ icon: Icon, label, value, detail, tone, featured = false, count, format }) {
+  const reduceMotion = usePrefersReducedMotion();
+  const animated = !reduceMotion && Number.isFinite(count) && typeof format === "function";
+  const current = useCountUp(count, animated);
+  const shown = animated ? format(current) : value;
   return <article className={`metric-card metric-card--dashboard${featured ? " metric-card--feature" : ""}`}>
     <div className="metric-head"><div className={`metric-icon tone-${tone}`}><Icon size={19} aria-hidden="true" /></div><div className="metric-label">{label}</div></div>
-    <strong className="metric-value">{value}</strong>{detail && <div className="metric-detail">{detail}</div>}
+    <strong className="metric-value">{animated ? <><span aria-hidden="true">{shown}</span><span className="sr-only">{value}</span></> : value}</strong>{detail && <div className="metric-detail">{detail}</div>}
   </article>;
 }
 

@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+// These checks build real PNG sources and wait for the async logo fit to be
+// applied. Under full-suite load that can exceed the 30s project default.
+test.setTimeout(60_000);
+
 const api = "http://localhost:5000/api/v1";
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nE8AAAAASUVORK5CYII=";
 const pngBuffer = Buffer.from(PNG_BASE64, "base64");
@@ -224,10 +228,12 @@ async function createLogoPng(page, kind) {
 async function waitForSavedLogo(page, version, width, height, minimum = 5) {
   await page.waitForFunction(({ version, width, height, minimum }) => {
     const images = [...document.querySelectorAll(".school-logo img")];
-    return images.length >= minimum && images.every((image) =>
-      image.complete && image.naturalWidth === width && image.naturalHeight === height
-      && image.src.includes(`v=${version}`)
-    );
+    return images.length >= minimum && images.every((image) => {
+      const frame = image.closest(".school-logo");
+      const scale = frame && getComputedStyle(frame).getPropertyValue("--logo-scale").trim();
+      return image.complete && image.naturalWidth === width && image.naturalHeight === height
+        && image.src.includes(`v=${version}`) && scale && scale !== "1";
+    });
   }, { version, width, height, minimum });
 }
 
@@ -333,7 +339,7 @@ test("admin previews, saves a logo and sees branding update without signing out"
   await expect(state.calls.find((call) => call.path === "/schools/me/logo" && call.method === "POST")).toBeFalsy();
 
   await page.getByRole("button", { name: "Save logo" }).click();
-  await expect(page.getByRole("status")).toContainText("uploaded successfully");
+  await expect(page.getByRole("status").filter({ hasText: "uploaded successfully" })).toBeVisible();
   await expect(page.getByText("Current logo")).toBeVisible();
 
   const upload = state.calls.find((call) => call.path === "/schools/me/logo" && call.method === "POST");
@@ -394,7 +400,7 @@ test("admin can replace and remove a logo, with branding following each change",
 
   await page.getByRole("button", { name: /Remove logo/ }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Remove logo" }).click();
-  await expect(page.getByRole("status")).toContainText("logo removed");
+  await expect(page.getByRole("status").filter({ hasText: "logo removed" })).toBeVisible();
   expect(state.calls.some((call) => call.path === "/schools/me/logo" && call.method === "DELETE")).toBe(true);
   await expect(page.locator(".brand-mark.school-logo--image")).toHaveCount(0);
   await expect(page.getByText("No logo yet")).toBeVisible();
@@ -532,7 +538,7 @@ test("circular logo presentation stays inside the mobile viewport", async ({ pag
     name: "mobile.png", mimeType: "image/png", buffer: logo.buffer
   });
   await page.getByRole("button", { name: "Save logo" }).click();
-  await expect(page.getByRole("status")).toContainText("uploaded successfully");
+  await expect(page.getByRole("status").filter({ hasText: "uploaded successfully" })).toBeVisible();
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar")).toHaveClass(/sidebar-open/);
 
@@ -596,7 +602,7 @@ test("all five locations fit square, landscape, portrait, transparent and white-
     }
 
     await page.getByRole("button", { name: "Save logo" }).click();
-    await expect(page.getByRole("status")).toContainText("uploaded successfully");
+    await expect(page.getByRole("status").filter({ hasText: "uploaded successfully" })).toBeVisible();
     await waitForSavedLogo(page, state.school.logo.version, image.width, image.height);
 
     for (const selector of savedLocations) {
@@ -617,7 +623,7 @@ test.describe("dark theme logo presentation", () => {
       name: "dark.png", mimeType: "image/png", buffer: logo.buffer
     });
     await page.getByRole("button", { name: "Save logo" }).click();
-    await expect(page.getByRole("status")).toContainText("uploaded successfully");
+    await expect(page.getByRole("status").filter({ hasText: "uploaded successfully" })).toBeVisible();
     await waitForSavedLogo(page, state.school.logo.version, logo.width, logo.height);
 
     for (const selector of [

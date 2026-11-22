@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, LoaderCircle, Trash2 } from "../components/ui/icon/icons.jsx";
 import { del, post } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import { Notice } from "../components/feedback.jsx";
+import { confirmDanger, notify } from "../components/feedback/appFeedback.js";
+import { useUnsavedChanges } from "../components/feedback/unsavedChanges.js";
 import SchoolLogo from "../components/SchoolLogo.jsx";
 import {
   SCHOOL_LOGO_ACCEPT,
@@ -20,11 +21,11 @@ export default function SchoolLogoManager({ school, onUpdated }) {
   const { refreshIdentity } = useAuth();
   const fileInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState(null);
+  const [notice, setNotice] = useState(null); // local file-validation feedback only
   const [pending, setPending] = useState(null); // { file, contentType, url, name }
-  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const hasLogo = Boolean(school?.logo?.version);
+  useUnsavedChanges(Boolean(pending) && !busy, "You have a selected logo that has not been saved yet. Leave without saving?");
 
   useEffect(() => () => {
     if (pending?.url) URL.revokeObjectURL(pending.url);
@@ -63,7 +64,7 @@ export default function SchoolLogoManager({ school, onUpdated }) {
   };
 
   const saveLogo = async () => {
-    if (!pending) return;
+    if (!pending || busy) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -76,27 +77,24 @@ export default function SchoolLogoManager({ school, onUpdated }) {
       clearPending();
       await refreshIdentity();
       onUpdated?.(result.logo);
-      setNotice({ type: "success", message: "School logo uploaded successfully. It now appears across all workspaces." });
+      notify.success("School logo uploaded successfully. It now appears across all workspaces.");
     } catch (error) {
-      setNotice({ type: "error", message: error.message || "The logo could not be uploaded." });
+      notify.error(error, { title: "The logo could not be uploaded" });
     } finally {
       setBusy(false);
     }
   };
 
   const removeLogo = async () => {
+    if (busy) return;
     setBusy(true);
     setNotice(null);
     try {
       await del("/schools/me/logo");
       await refreshIdentity();
       onUpdated?.(null);
-      setNotice({ type: "success", message: "School logo removed. The default icon is now shown." });
-    } catch (error) {
-      setNotice({ type: "error", message: error.message || "The logo could not be removed." });
     } finally {
       setBusy(false);
-      setConfirmRemove(false);
     }
   };
 
@@ -156,25 +154,23 @@ export default function SchoolLogoManager({ school, onUpdated }) {
             </button>
           )}
           {hasLogo && !pending && (
-            <button type="button" className="button button-outline" onClick={() => setConfirmRemove(true)} disabled={busy}>
+            <button type="button" className="button button-outline" disabled={busy} onClick={() => confirmDanger({
+              title: "Remove school logo?",
+              message: "Your school will return to the default icon across all workspaces. This cannot be undone.",
+              confirmText: "Remove logo",
+              onConfirm: removeLogo,
+              success: { title: "School logo removed", description: "The default icon is now shown." },
+              error: { title: "The logo could not be removed" }
+            })}>
               <Trash2 size={16} aria-hidden="true" />Remove logo
             </button>
           )}
         </div>
       </div>
 
+      {busy && pending && <div className="upload-status" role="status" aria-live="polite"><span className="upload-status-bar" aria-hidden="true" /><span>Uploading logo… Please keep this window open.</span></div>}
       <p className="field-hint">Supported formats: {SCHOOL_LOGO_FORMAT_LABEL}. Your logo is stored securely and shown only within your school.</p>
       <Notice notice={notice} onClose={() => setNotice(null)} />
-      {confirmRemove && (
-        <ConfirmDialog
-          title="Remove school logo?"
-          message="Your school will return to the default icon across all workspaces. This cannot be undone."
-          confirmLabel="Remove logo"
-          busy={busy}
-          onConfirm={removeLogo}
-          onClose={() => setConfirmRemove(false)}
-        />
-      )}
     </section>
   );
 }

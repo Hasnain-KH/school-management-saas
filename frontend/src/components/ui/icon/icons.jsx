@@ -147,5 +147,6 @@ export const UserRound = alias("userRound");
 export const Users = alias("staff");
 export const UsersRound = alias("parents");
 export const Wallet = alias("fees");
+export const WifiOff = alias("offline");
 export const X = alias("close");
 export const XCircle = alias("error");
