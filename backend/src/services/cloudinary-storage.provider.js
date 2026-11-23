@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from "cloudinary";
 import { HttpError } from "../utils/http-error.js";
+import { clampSignedUrlTtl } from "../utils/signed-url-ttl.js";
 
 // SchoolFlow stores every asset as an authenticated Cloudinary `raw` file.
 // Raw delivery preserves the original bytes and avoids Cloudinary image
@@ -8,6 +9,7 @@ export const CLOUDINARY_RESOURCE_TYPE = "raw";
 export const CLOUDINARY_DELIVERY_TYPE = "authenticated";
 export const CLOUDINARY_DEFAULT_FOLDER = "schoolflow";
 export const CLOUDINARY_DEFAULT_URL_TTL_SECONDS = 900;
+const CLOUDINARY_REQUEST_TIMEOUT_MS = 10000;
 
 const CONTENT_TYPE_FORMATS = new Map([
     ["application/pdf", "pdf"],
@@ -77,6 +79,21 @@ const classifyCloudinaryError = (error) => {
     return CLOUDINARY_ERROR_CATEGORIES.UNKNOWN;
 };
 
+// A missing asset is reported either as a 404 on an allowlisted numeric field
+// or as a plain "not found" result. Messages and response bodies are never
+// inspected, so a credential embedded in them cannot be forwarded.
+const isCloudinaryNotFound = (error) => {
+    if (!error || typeof error !== "object") return false;
+    for (const candidate of [error, error.error]) {
+        if (!candidate || typeof candidate !== "object") continue;
+        for (const field of NUMERIC_STATUS_FIELDS) {
+            if (Number(candidate[field]) === 404) return true;
+        }
+        if (Number(candidate.code) === 404) return true;
+    }
+    return false;
+};
+
 const storageError = (message, code, category = CLOUDINARY_ERROR_CATEGORIES.UNKNOWN) => {
     const error = new HttpError(502, message);
     error.code = code;
@@ -125,7 +142,8 @@ export const createCloudinaryStorage = ({
     folder = CLOUDINARY_DEFAULT_FOLDER,
     secure = true,
     urlExpirySeconds = CLOUDINARY_DEFAULT_URL_TTL_SECONDS,
-    client = cloudinary
+    client = cloudinary,
+    fetchImpl = fetch
 } = {}) => {
     if (!cloudName || !apiKey || !apiSecret) {
         throw new TypeError("Cloudinary storage requires cloudName, apiKey, and apiSecret");
@@ -134,15 +152,15 @@ export const createCloudinaryStorage = ({
         || typeof client.config !== "function"
         || typeof client.uploader?.upload !== "function"
         || typeof client.uploader?.destroy !== "function"
-        || typeof client.utils?.private_download_url !== "function") {
-        throw new TypeError("Cloudinary client must provide config, uploader.upload, uploader.destroy, and utils.private_download_url");
+        || typeof client.utils?.private_download_url !== "function"
+        || typeof client.utils?.api_sign_request !== "function"
+        || typeof client.api?.resource !== "function") {
+        throw new TypeError("Cloudinary client must provide config, uploader.upload, uploader.destroy, utils.private_download_url, utils.api_sign_request, and api.resource");
     }
 
     client.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure });
 
-    const ttl = Number.isFinite(Number(urlExpirySeconds)) && Number(urlExpirySeconds) > 0
-        ? Math.floor(Number(urlExpirySeconds))
-        : CLOUDINARY_DEFAULT_URL_TTL_SECONDS;
+    const ttl = clampSignedUrlTtl(urlExpirySeconds, CLOUDINARY_DEFAULT_URL_TTL_SECONDS);
 
     const upload = async ({ key, body, contentType = "application/octet-stream" }) => {
         const payload = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -157,7 +175,8 @@ export const createCloudinaryStorage = ({
                 type: CLOUDINARY_DELIVERY_TYPE,
                 overwrite: false,
                 context: `storage_key=${publicId}`,
-                tags: [CLOUDINARY_DEFAULT_FOLDER]
+                tags: [CLOUDINARY_DEFAULT_FOLDER],
+                timeout: CLOUDINARY_REQUEST_TIMEOUT_MS
             });
         } catch (cause) {
             throw storageError(
@@ -181,7 +200,8 @@ export const createCloudinaryStorage = ({
             result = await client.uploader.destroy(publicId, {
                 resource_type: CLOUDINARY_RESOURCE_TYPE,
                 type: CLOUDINARY_DELIVERY_TYPE,
-                invalidate: true
+                invalidate: true,
+                timeout: CLOUDINARY_REQUEST_TIMEOUT_MS
             });
         } catch (cause) {
             throw storageError(
@@ -204,9 +224,7 @@ export const createCloudinaryStorage = ({
     // already carries its extension, and it ignores `expires_at`.
     const createDownloadUrl = async ({ key, expiresIn = ttl, contentType } = {}) => {
         const publicId = toCloudinaryPublicId(key, folder);
-        const seconds = Number.isFinite(Number(expiresIn)) && Number(expiresIn) > 0
-            ? Math.floor(Number(expiresIn))
-            : ttl;
+        const seconds = clampSignedUrlTtl(expiresIn, ttl);
         const format = formatFromContentType(contentType) ?? formatFromKey(key) ?? "bin";
         const options = {
             resource_type: CLOUDINARY_RESOURCE_TYPE,
@@ -225,5 +243,117 @@ export const createCloudinaryStorage = ({
         }
     };
 
-    return { upload, delete: remove, createDownloadUrl };
+    // Cloudinary accepts a server-signed POST for direct uploads. Only the
+    // server-generated public ID and fixed asset settings are signed; the
+    // secret is used locally to compute the signature and never leaves here.
+    const createUploadAuthorization = ({ key, contentType = "application/octet-stream", expiresInSeconds = 300 } = {}) => {
+        const publicId = toCloudinaryPublicId(key, folder);
+        const seconds = Math.min(300, clampSignedUrlTtl(expiresInSeconds, 300));
+        const timestamp = Math.floor(Date.now() / 1000);
+        const params = {
+            public_id: publicId,
+            resource_type: CLOUDINARY_RESOURCE_TYPE,
+            type: CLOUDINARY_DELIVERY_TYPE,
+            overwrite: "false",
+            context: `storage_key=${publicId}`,
+            tags: [CLOUDINARY_DEFAULT_FOLDER],
+            timestamp
+        };
+        const signature = client.utils.api_sign_request(params, apiSecret);
+        const protocol = secure ? "https" : "http";
+
+        return {
+            kind: "cloudinarySignedPost",
+            method: "POST",
+            url: `${protocol}://api.cloudinary.com/v1_1/${cloudName}/${CLOUDINARY_RESOURCE_TYPE}/upload`,
+            fields: { ...params, api_key: apiKey, signature },
+            key,
+            contentType,
+            expiresInSeconds: seconds,
+            expiresAt: new Date((timestamp + seconds) * 1000).toISOString()
+        };
+    };
+
+    const getObjectMetadata = async ({ key } = {}) => {
+        const publicId = toCloudinaryPublicId(key, folder);
+        let result;
+        try {
+            result = await client.api.resource(publicId, {
+                resource_type: CLOUDINARY_RESOURCE_TYPE,
+                type: CLOUDINARY_DELIVERY_TYPE
+            });
+        } catch (cause) {
+            if (isCloudinaryNotFound(cause)) return null;
+            throw storageError(
+                "The document storage provider rejected the object lookup",
+                "CLOUDINARY_OBJECT_LOOKUP_FAILED",
+                classifyCloudinaryError(cause)
+            );
+        }
+
+        if (result === "not found" || result?.result === "not found") return null;
+        if (!result || typeof result !== "object" || result.public_id !== publicId) {
+            throw storageError("The document storage provider returned an invalid object lookup response", "CLOUDINARY_OBJECT_LOOKUP_INVALID");
+        }
+
+        return {
+            key,
+            publicId: result.public_id,
+            sizeBytes: Number(result.bytes) || null,
+            contentType: result.format || null,
+            etag: result.etag || null,
+            durationSeconds: Number.isFinite(Number(result.duration)) ? Number(result.duration) : null,
+            lastModified: result.created_at || null
+        };
+    };
+
+    const readObjectBytes = async ({ key, maxBytes } = {}) => {
+        const url = await createDownloadUrl({ key, expiresIn: 60 });
+        let response;
+        try {
+            response = await fetchImpl(url, { signal: AbortSignal.timeout(CLOUDINARY_REQUEST_TIMEOUT_MS) });
+        } catch (cause) {
+            throw storageError(
+                "The document storage provider rejected the object read",
+                "CLOUDINARY_OBJECT_READ_FAILED",
+                classifyCloudinaryError(cause)
+            );
+        }
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            throw storageError(
+                "The document storage provider rejected the object read",
+                "CLOUDINARY_OBJECT_READ_FAILED",
+                STATUS_CATEGORIES.get(response.status) ?? CLOUDINARY_ERROR_CATEGORIES.UNKNOWN
+            );
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (Number.isFinite(maxBytes) && buffer.length > maxBytes + 1) {
+            const error = new HttpError(400, "The uploaded object exceeds the provider-compatible size limit");
+            error.code = "STORAGE_OBJECT_TOO_LARGE";
+            throw error;
+        }
+        return buffer;
+    };
+
+    // 10 MB is a deliberately conservative ceiling for raw files on a Free
+    // Cloudinary plan; whether a given live account allows more is unverified.
+    const getCapabilities = () => ({
+        directUpload: "cloudinarySignedPost",
+        objectLookup: true,
+        objectRead: true,
+        maxUploadBytes: 10 * 1024 * 1024,
+        uploadAuthTtlSeconds: 300
+    });
+
+    return {
+        upload,
+        delete: remove,
+        createDownloadUrl,
+        createUploadAuthorization,
+        getObjectMetadata,
+        readObjectBytes,
+        getCapabilities
+    };
 };

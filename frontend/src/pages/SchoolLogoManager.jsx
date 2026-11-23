@@ -77,8 +77,12 @@ export default function SchoolLogoManager({ school, onUpdated }) {
       clearPending();
       await refreshIdentity();
       onUpdated?.(result.logo);
+      // Release the busy state before announcing success so the controls are
+      // usable as soon as the success message becomes visible.
+      setBusy(false);
       notify.success("School logo uploaded successfully. It now appears across all workspaces.");
     } catch (error) {
+      setBusy(false);
       notify.error(error, { title: "The logo could not be uploaded" });
     } finally {
       setBusy(false);

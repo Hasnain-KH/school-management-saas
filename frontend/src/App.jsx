@@ -13,6 +13,10 @@ const WorkspacePage = lazy(() => import("./pages/WorkspacePage.jsx"));
 const FixedAssetsPage = lazy(() => import("./pages/FixedAssetsPage.jsx"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage.jsx"));
 const DocumentsPage = lazy(() => import("./pages/DocumentsPage.jsx"));
+const TeacherStudentMediaPage = lazy(() => import("./pages/TeacherStudentMediaPage.jsx"));
+const AdminStudentMediaReviewPage = lazy(() => import("./pages/AdminStudentMediaReviewPage.jsx"));
+const AdminStudentMediaUsagePage = lazy(() => import("./pages/AdminStudentMediaUsagePage.jsx"));
+const ParentMomentsPage = lazy(() => import("./pages/ParentMomentsPage.jsx"));
 const BillingPage = lazy(() => import("./pages/BillingPage.jsx"));
 const PlatformRevenuePage = lazy(() => import("./pages/PlatformRevenuePage.jsx"));
 
@@ -63,6 +67,10 @@ export default function App() {
       <Route path="announcements" element={<WorkspaceRoute page="announcements" roles={allSchoolRoles} />} />
       <Route path="notifications" element={<Protected roles={allSchoolRoles}><NotificationsPage /></Protected>} />
       <Route path="documents" element={<Protected roles={allSchoolRoles}><DocumentsPage /></Protected>} />
+      <Route path="student-media" element={<Protected roles={["teacher", "school_admin", "principal"]}><TeacherStudentMediaPage /></Protected>} />
+      <Route path="student-media/review" element={<Protected roles={adminRoles}><AdminStudentMediaReviewPage /></Protected>} />
+      <Route path="student-media/usage" element={<Protected roles={adminRoles}><AdminStudentMediaUsagePage /></Protected>} />
+      <Route path="moments" element={<Protected roles={["parent"]}><ParentMomentsPage /></Protected>} />
       <Route path="reports" element={<WorkspaceRoute page="reports" />} />
       <Route path="audit" element={<WorkspaceRoute page="audit" roles={staffRoles} />} />
       <Route path="subscriptions" element={<WorkspaceRoute page="subscriptions" />} />

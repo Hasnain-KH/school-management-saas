@@ -175,8 +175,18 @@ Until an adapter exists, checkout-dependent screens must report the feature as u
 ## 7. Monitoring and alerting (recommended)
 
 - Vercel captures sanitized runtime logs; use the **Logs** view and failed `JobRun` records to diagnose issues.
+- API responses include an `x-request-id` header. Echo a safe token from clients to correlate application logs with a request; unsafe values are replaced with a generated ID.
 - Before production traffic, add an external error/alerting integration (for example Sentry or a log drain) and alert on: repeated `5xx`, `503` rate-limit failures, and `JobRun` rows with `status: "failed"`.
 - No monitoring provider is wired in by default.
+
+## 8. Backups and restore (pending operational setup)
+
+No automated database backup, point-in-time recovery, retention schedule, or restore rehearsal is configured by this repository. Before production traffic:
+
+1. Enable MongoDB Atlas backups/PITR (or an equivalent managed backup) with a documented retention period.
+2. Keep private object-storage versioning/backup enabled for documents, school logos, and student media; application metadata and stored bytes must be restorable together.
+3. Rehearse a restore into an **isolated** database and bucket prefix whose names begin with `schoolflow_test`. Verify tenant relationships, indexes from `npm run db:indexes`, storage-key references, and that private media access still requires authenticated signed URLs.
+4. Record the restore time objective, restore point objective, and the person responsible. Until this rehearsal is performed and evidenced, treat backup/restore as **unverified**.
 
 ## Security rules for all of the above
 
@@ -184,3 +194,32 @@ Until an adapter exists, checkout-dependent screens must report the feature as u
 - Never log secrets, tokens, connection strings, or file contents.
 - Keep buckets private and scopes least-privilege.
 - Rotate `JOBS_RUNNER_SECRET` and provider keys periodically.
+
+## Student Media direct-to-storage upload (optional)
+
+When the selected storage provider supports it, a teacher can upload in two steps instead of sending base64 bytes through the API:
+
+1. `POST /api/v1/student-media/teacher/upload-authorize` (or the resubmit variant) validates metadata and reserves the daily slot/quota. The backend generates the object key and returns a short-lived authorization: a presigned `PUT` for S3-compatible storage or a Cloudinary signed `POST`. TTL is enforced by the backend at **300 seconds or less**; the authorization signs only the generated key and fixed asset settings, uses no public ACL, and never places a provider secret in the client payload.
+2. The browser uploads bytes straight to the provider. At `POST /api/v1/student-media/teacher/upload-finalize` (or resubmit-finalize), the backend looks up the object and reads its bytes from the provider, then verifies size, the client-supplied SHA-256 checksum, and magic-byte/file-signature compatibility before creating or updating the media record. Provider-reported duration is used when available; browser-reported duration is advisory only, and video publication stays blocked until trusted metadata verifies it.
+
+Direct upload does not change access control or moderation: student consent evaluation, admin review, and publication rules still apply, and bytes remain available only through short-lived signed URLs (default 300 seconds). Clients check the capabilities response before starting a direct upload and use the existing base64 `POST /teacher/upload` path only when direct upload is unsupported. An unsupported or unconfigured provider returns `503`; a failure after authorization is surfaced and never silently retried as base64.
+
+Provider notes:
+
+- S3-compatible adapters advertise presigned `PUT`. The effective size cap depends on the bucket/provider; the application's per-media-type limits still apply. Configure bucket CORS for the frontend origin and set `STORAGE_UPLOAD_ORIGINS` to the exact upload origin(s).
+- The Cloudinary adapter uploads `raw` assets with `authenticated` delivery and applies a conservative **10 MB** effective cap because the official Free-plan raw-file limit is 10 MB. The plan and direct-upload capability of a live account are **unverified**: no provider API call was made while documenting this behavior. Its CSP `connect-src` must include the exact Cloudinary upload origin.
+- `vercel.json` ships a static CSP whose `connect-src` includes `'self'` and the Cloudinary upload origins; other providers' exact upload origins must be added there before browser direct uploads are enabled. See [`backend/docs/ENVIRONMENT.md`](../backend/docs/ENVIRONMENT.md).
+
+## Manual cleanup job: `student_media_cleanup`
+
+A manual-only compensation job, `student_media_cleanup`, is invoked explicitly through the existing secured jobs endpoint:
+
+```
+POST /api/v1/jobs/run
+x-jobs-secret: <JOBS_RUNNER_SECRET>
+Content-Type: application/json
+
+{ "job": "student_media_cleanup" }
+```
+
+It is **not** registered in any automatic scheduler (including `runAllJobs` and the optional dev scheduler). It repairs side effects that a MongoDB transaction cannot roll back: orphaned storage objects from abandoned or incomplete direct uploads, per-school quota and teacher daily-slot counter drift, and consent-suspension tasks. A direct-upload authorization that expires without a finalize call is reconciled only after its short-lived window closes; an in-flight upload is never cancelled by the job. Work is recorded as durable, idempotent tasks with leases and retry limits. Deploy the new indexes first with `npm run db:indexes` from `backend/` so task uniqueness and lookup indexes exist before the job is invoked. Without `JOBS_RUNNER_SECRET` the jobs endpoint returns `503`.

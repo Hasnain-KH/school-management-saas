@@ -32,7 +32,8 @@ export const feeStructureCreateSchema = z.object({
     frequency: z.enum(["monthly", "annual"]),
     dueDay: z.number().int().min(1).max(28).default(10),
     dueMonth: z.number().int().min(1).max(12).optional(),
-    currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
+    // Ignored by server; tenant base currency is authoritative.
+    currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional(),
     lineItems: z.array(feeLineSchema).min(1).max(30)
 }).strict().refine(({ frequency, dueMonth }) => frequency !== "annual" || dueMonth !== undefined, {
     message: "Annual fee structures require a due month",

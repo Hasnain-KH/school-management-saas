@@ -1,8 +1,10 @@
 import { createHash, createHmac } from "node:crypto";
 import { HttpError } from "../utils/http-error.js";
+import { clampSignedUrlTtl } from "../utils/signed-url-ttl.js";
 import { createCloudinaryStorage } from "./cloudinary-storage.provider.js";
 
 const configuredProviders = new Map();
+const S3_REQUEST_TIMEOUT_MS = 10000;
 let provider = null;
 let providerName = null;
 
@@ -145,7 +147,8 @@ export const createS3CompatibleStorage = ({
                 "x-amz-date": amzDate(date),
                 "x-amz-content-sha256": payloadHash
             },
-            body: payload
+            body: payload,
+            signal: AbortSignal.timeout(S3_REQUEST_TIMEOUT_MS)
         });
         if (!response.ok) {
             const error = new HttpError(502, "The document storage provider rejected the upload");
@@ -173,7 +176,8 @@ export const createS3CompatibleStorage = ({
                 authorization,
                 "x-amz-date": amzDate(date),
                 "x-amz-content-sha256": sha256Hex("")
-            }
+            },
+            signal: AbortSignal.timeout(S3_REQUEST_TIMEOUT_MS)
         });
         if (!response.ok && response.status !== 404) {
             const error = new HttpError(502, "The document storage provider rejected the deletion");
@@ -183,15 +187,16 @@ export const createS3CompatibleStorage = ({
         return { deleted: true };
     };
 
-    const createDownloadUrl = async ({ key, expiresIn = urlExpirySeconds }) => {
+    const createDownloadUrl = async ({ key, expiresIn }) => {
         const date = new Date();
         const path = objectPath(key);
+        const seconds = clampSignedUrlTtl(expiresIn, urlExpirySeconds);
         const scope = `${shortDate(date)}/${region}/s3/aws4_request`;
         const query = {
             "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
             "X-Amz-Credential": `${accessKeyId}/${scope}`,
             "X-Amz-Date": amzDate(date),
-            "X-Amz-Expires": String(expiresIn),
+            "X-Amz-Expires": String(seconds),
             "X-Amz-SignedHeaders": "host"
         };
         const canonicalRequest = [
@@ -214,7 +219,116 @@ export const createS3CompatibleStorage = ({
         return `${parsed.protocol}//${hostHeader}${path}?${canonicalizeQuery(query)}&X-Amz-Signature=${signature}`;
     };
 
-    return { upload, delete: remove, createDownloadUrl };
+    // Short-lived SigV4 PUT authorization. Only the server-generated key and
+    // content type are signed; no ACL, bucket listing, or credential is exposed.
+    const createUploadAuthorization = ({ key, contentType = "application/octet-stream", expiresInSeconds = 300 } = {}) => {
+        if (typeof key !== "string" || !key.trim()) throw new TypeError("An object key is required");
+        const date = new Date();
+        const path = objectPath(key);
+        const seconds = Math.min(300, clampSignedUrlTtl(expiresInSeconds, 300));
+        const scope = `${shortDate(date)}/${region}/s3/aws4_request`;
+        const signedHeaders = "content-type;host";
+        const query = {
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-Credential": `${accessKeyId}/${scope}`,
+            "X-Amz-Date": amzDate(date),
+            "X-Amz-Expires": String(seconds),
+            "X-Amz-SignedHeaders": signedHeaders
+        };
+        const canonicalRequest = [
+            "PUT",
+            path,
+            canonicalizeQuery(query),
+            `content-type:${contentType}\nhost:${hostHeader}\n`,
+            signedHeaders,
+            "UNSIGNED-PAYLOAD"
+        ].join("\n");
+        const signature = createHmac("sha256", deriveSigningKey(secretAccessKey, date, region, "s3"))
+            .update([
+                "AWS4-HMAC-SHA256",
+                amzDate(date),
+                scope,
+                sha256Hex(canonicalRequest)
+            ].join("\n"))
+            .digest("hex");
+        return {
+            kind: "presignedPut",
+            method: "PUT",
+            url: `${parsed.protocol}//${hostHeader}${path}?${canonicalizeQuery(query)}&X-Amz-Signature=${signature}`,
+            headers: { "Content-Type": contentType },
+            key,
+            contentType,
+            expiresInSeconds: seconds,
+            expiresAt: new Date(date.getTime() + seconds * 1000).toISOString()
+        };
+    };
+
+    const signedFetch = async ({ method, path, payloadHash, date = new Date(), extraHeaders = {} }) => {
+        const { signature, signedHeaderNames, scope, canonicalHeaders } = sign({
+            method,
+            path,
+            payloadHash,
+            date,
+            extraHeaders
+        });
+        const response = await fetchImpl(`${parsed.protocol}//${hostHeader}${path}`, {
+            method,
+            headers: {
+                ...canonicalHeaders,
+                authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaderNames.join(";")}, Signature=${signature}`,
+                "x-amz-date": amzDate(date),
+                "x-amz-content-sha256": payloadHash
+            },
+            signal: AbortSignal.timeout(S3_REQUEST_TIMEOUT_MS)
+        });
+        return response;
+    };
+
+    const getObjectMetadata = async ({ key }) => {
+        const response = await signedFetch({ method: "HEAD", path: objectPath(key), payloadHash: sha256Hex("") });
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            const error = new HttpError(502, "The document storage provider rejected the object lookup");
+            error.code = `STORAGE_${response.status}`;
+            throw error;
+        }
+        const size = Number(response.headers?.get?.("content-length") ?? 0);
+        return {
+            key,
+            sizeBytes: Number.isFinite(size) && size >= 0 ? size : null,
+            contentType: response.headers?.get?.("content-type") || null,
+            etag: response.headers?.get?.("etag") || null,
+            lastModified: response.headers?.get?.("last-modified") || null,
+            durationSeconds: null
+        };
+    };
+
+    const readObjectBytes = async ({ key, maxBytes }) => {
+        const url = await createDownloadUrl({ key, expiresIn: 60 });
+        const response = await fetchImpl(url, { signal: AbortSignal.timeout(S3_REQUEST_TIMEOUT_MS) });
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            const error = new HttpError(502, "The document storage provider rejected the object read");
+            error.code = `STORAGE_${response.status}`;
+            throw error;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (Number.isFinite(maxBytes) && buffer.length > maxBytes + 1) {
+            const error = new HttpError(400, "The uploaded object exceeds the provider-compatible size limit");
+            error.code = "STORAGE_OBJECT_TOO_LARGE";
+            throw error;
+        }
+        return buffer;
+    };
+
+    const getCapabilities = () => ({
+        directUpload: "presignedPut",
+        objectLookup: true,
+        objectRead: true,
+        uploadAuthTtlSeconds: 300
+    });
+
+    return { upload, delete: remove, createDownloadUrl, createUploadAuthorization, getObjectMetadata, readObjectBytes, getCapabilities };
 };
 
 // Configures object storage from environment variables, leaving the 503

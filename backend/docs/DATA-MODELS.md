@@ -39,6 +39,7 @@
 - **LibraryBook** — tenant library catalog item with total and available copy counts.
 - **LibraryLoan** — tenant-scoped student issue/return record, unique active loan per student/book, and due-date index.
 - **Announcement** — tenant-scoped in-app announcement with audience roles, publication/expiry window, and creator.
+- **StudentMediaCleanupTask** — durable, idempotent compensation ledger for Student Media side effects (storage objects, quota and daily-slot counters, consent suspension) that cannot be rolled back in a MongoDB transaction; processed only by the manual `student_media_cleanup` job.
 
 Branches remain embedded subdocuments in `School` rather than duplicated in a separate collection. Academic branch references use the embedded branch `_id`, and services verify the branch belongs to the authenticated school's document. `Section.enrolledCount` is adjusted atomically with student admissions, placements, and status changes; before enabling these workflows in an existing database, backfill it from enrolled student records.
 
@@ -63,3 +64,9 @@ Fixed-asset depreciation records use straight-line allocation in integer minor u
 Parent self-service resolves same-school guardian records by the authenticated parent's normalized email and then traverses `StudentGuardian` links. Parent portal endpoints query the resulting student IDs and still constrain every child read by school ID. They do not accept guardian or school identifiers as authorization input.
 
 Password recovery and email verification action tokens are random, hashed before persistence, expire after 30 minutes, and are consumed together with the corresponding account update in a MongoDB transaction. Password reset revokes outstanding refresh sessions. Email delivery is an explicit provider interface; no provider or delivery credentials are configured. Recovery/verification requests do not create or expose tokens when delivery is unavailable.
+
+## Student Media direct-upload state
+
+- `StudentMedia` adds `durationVerified` (boolean, default `false`), `durationSource` (`unverified` or `provider`), `metadataVerifiedAt` (timestamp or `null`), and `uploadMode` (`base64` by default, or `direct`). Browser-reported duration is advisory; publication of a video is blocked until trusted provider metadata verifies it.
+- `StudentMediaUploadReservation` adds `directUpload` (non-sensitive direct-upload state, default `null`), `uploadAuthExpiresAt` (short authorization expiry, independently enforced at 300 seconds or less), `completionStatus` (`none`, `completed`, or `failed`), `completedAt`, and `mediaId` (resulting media). These support idempotent finalize retries and stale-reservation cleanup.
+- `StudentMediaCleanupTask` stores `schoolId`, `idempotencyKey`, `kind` (`direct_upload`, `direct_resubmit`, `storage_delete`, `quota_release`, `daily_slot_release`, or `consent_suspension`), `phase`, `status` (`pending`, `running`, `done`, or `failed`), `attempts`, `leaseExpiresAt`, `nextAttemptAt`, `lastErrorCode`, an allowlisted non-sensitive `payload` (no provider secrets, signatures, signed URLs, or file contents), `result`, and timestamps. A unique `(schoolId, idempotencyKey)` index and status/lease indexes make retries safe; the new indexes must be deployed before the manual cleanup job runs.

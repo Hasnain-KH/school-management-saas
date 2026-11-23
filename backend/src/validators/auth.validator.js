@@ -13,7 +13,9 @@ export const schoolRegistrationSchema = z.object({
     email: emailSchema,
     phone: z.string().trim().max(30).optional(),
     adminName: z.string().trim().min(2).max(120),
-    password: passwordSchema
+    password: passwordSchema,
+    baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+    currencyConfirmed: z.literal(true)
 }).strict();
 
 export const loginSchema = z.object({
@@ -67,3 +69,9 @@ export const updateSchoolSchema = z.object({
 }).strict().refine((value) => Object.keys(value).length > 0, {
     message: "At least one school field must be provided"
 });
+
+export const configureSchoolCurrencySchema = z.object({
+    baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+    confirmation: z.literal(true),
+    acknowledgedExistingAmounts: z.boolean().optional()
+}).strict();

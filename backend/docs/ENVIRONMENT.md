@@ -29,6 +29,7 @@ This document lists the environment variables read by SchoolFlow source and its 
 | Variable | Required? | Local development | Vercel production | Default / behavior | Owner and use | External credential? |
 |---|---|---|---|---|---|---|
 | `VITE_API_URL` | No | Defaults to `http://localhost:5000/api/v1`. Override only when the API is at another origin/path. | Leave unset for the configured same-origin deployment; default is `/api/v1`. For a split API deployment, set it to the API origin plus `/api/v1`. | Environment-specific fallback as described. Trailing slash is removed. | Frontend: `frontend/src/api/client.js`, substituted at Vite build time. | No. It is an API URL, not a secret. Do not place credentials or private keys in `VITE_*` variables; they are shipped to browsers. |
+| `STORAGE_UPLOAD_ORIGINS` | No | Optional; set only when the frontend performs direct-to-storage Student Media uploads. | Optional; the static Vercel CSP must also allow the exact provider upload origins (see below). | Unset. Comma-separated exact upload origins used by the frontend build/CSP configuration; no wildcard is implied. | Frontend build: direct-upload origin allowlist for Student Media; see [external services](./EXTERNAL-SERVICES.md). | No. Public origins, not a secret or credential. |
 
 There are no required frontend environment variables for the default local or same-origin Vercel setup. `frontend/.env.example` contains only the optional `VITE_API_URL` override and deliberately leaves it blank.
 
@@ -56,6 +57,8 @@ These variables are optional. When they are absent, SchoolFlow keeps its safe de
 | `STORAGE_SECRET_ACCESS_KEY` | No | Optional. | Optional. Required with the endpoint and bucket. | Unset. | Backend: `backend/src/services/document-storage.provider.js`. | Yes: object-storage secret key. |
 | `STORAGE_REGION` | No | Optional. | Optional. | `us-east-1`. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
 | `STORAGE_FORCE_PATH_STYLE` | No | Optional. | Optional. | `true` unless set to the literal `false`. Set `false` for virtual-hosted-style endpoints. | Backend: `backend/src/services/document-storage.provider.js`. | No. |
+| `STUDENT_MEDIA_SIGNED_URL_TTL_SECONDS` | No | Optional. | Optional; keep short. | `300` seconds. Accepted range is `60`–`3600`; invalid values fall back to the default. Applies to new student-media access URLs only. | Backend: `backend/src/services/student-media.service.js` and `backend/src/utils/signed-url-ttl.js`. | No. |
+| `STUDENT_MEDIA_APP_QUOTA_BYTES` | No | Optional. | Optional; size according to the storage plan. | `1073741824` (1 GiB). Must be a positive safe integer; invalid values fall back to the default. Application-tracked bytes only, not provider-reported usage. | Backend: `backend/src/services/student-media.service.js`. | No. |
 
 ### Email verification policy and rollout for existing accounts
 
@@ -87,5 +90,7 @@ The Redis smoke test is separate from the ordinary backend suite. Provision a de
 ## Vercel configuration and external providers
 
 `vercel.json` does not declare environment variables. It configures the frontend build/output, serverless API function, SPA routing, and same-origin Content-Security-Policy headers. Configure secrets in Vercel's encrypted environment settings, not in `vercel.json`. The `VITE_API_URL` value is public build-time configuration; the backend URI, JWT secrets, and Redis URL are server-only. Production cookie authentication requires HTTPS; the default single-project Vercel deployment is same-origin. A split API deployment also requires adding its exact API origin to the Vercel `connect-src` policy, using a same-site frontend/API hostname arrangement, and listing exact frontend origins in `CORS_ORIGINS`.
+
+For direct-to-storage Student Media uploads, set `STORAGE_UPLOAD_ORIGINS` to the exact S3-compatible or Cloudinary upload origin(s) the frontend will use. The Vercel static CSP in `vercel.json` declares `connect-src 'self'`; it must also include those exact provider upload origins (no wildcards), otherwise browser uploads are blocked. Provider bucket/Cloudinary CORS must allow the frontend origin as well.
 
 Email, document-storage, and scheduled-job settings are read from environment variables when provided; see the optional-provider table above and [external services](./EXTERNAL-SERVICES.md). Payment processing remains a provider interface without a configured adapter. Provider credentials must be stored only in the deployment platform's encrypted settings or an ignored local `.env`; never commit them or place them in `VITE_*` variables. Keep `backend/.env.example` free of real values.

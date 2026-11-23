@@ -89,7 +89,9 @@ test("school registration is blocked until a default trial plan is configured (m
         schoolName: "Example School",
         email: "admin@example.test",
         adminName: "School Admin",
-        password: "A-longer-password-123"
+        password: "A-longer-password-123",
+        baseCurrency: "USD",
+        currencyConfirmed: true
     }), { statusCode: 503 });
 });
 

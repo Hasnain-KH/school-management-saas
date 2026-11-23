@@ -24,7 +24,7 @@ const makeEnv = (overrides = {}) => ({
 });
 
 const makeClient = ({ uploadResult, uploadError, destroyError, downloadError, signedUrl = SIGNED_URL } = {}) => {
-    const calls = { config: [], upload: [], destroy: [], downloadUrl: [] };
+    const calls = { config: [], upload: [], destroy: [], downloadUrl: [], resource: [], signRequest: [] };
     const client = {
         config: (options) => { calls.config.push(options); },
         uploader: {
@@ -44,6 +44,18 @@ const makeClient = ({ uploadResult, uploadError, destroyError, downloadError, si
                 calls.downloadUrl.push({ publicId, format, options });
                 if (downloadError) throw downloadError;
                 return signedUrl;
+            },
+            // Direct-upload capability detection requires signing support. The
+            // signature is fake; no provider call is made by this fixture.
+            api_sign_request: (params) => {
+                calls.signRequest.push(params);
+                return "fake-signature";
+            }
+        },
+        api: {
+            resource: async (publicId, options) => {
+                calls.resource.push({ publicId, options });
+                return { public_id: publicId, bytes: PNG.length, format: "png" };
             }
         }
     };

@@ -11,7 +11,7 @@
     "dev": "node --watch scripts/start-dev.js",
     "start": "node src/server.js",
     "build": "node -e \"console.log('Backend: no build step required')\"",
-    "test": "node --test",
+    "test": "node --experimental-test-module-mocks --import ./test-support/setup.js --test",
     "test:redis:integration": "node --test test/redis.integration.test.js",
     "test:mongo:integration": "node --test test/mongo.integration.test.js",
     "smoke:cloudinary": "node scripts/cloudinary-smoke-run.js",

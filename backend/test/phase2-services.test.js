@@ -7,12 +7,18 @@ import Notification from "../src/models/notification.model.js";
 import School from "../src/models/school.model.js";
 import SchoolDocument from "../src/models/document.model.js";
 import StudentGuardian from "../src/models/student-guardian.model.js";
+import StudentMediaCleanupTask from "../src/models/student-media-cleanup-task.model.js";
 import { listDocuments } from "../src/services/document.service.js";
 import {
     createNotificationsForUserIds,
     listNotifications
 } from "../src/services/notification.service.js";
-import { JOB_NAMES, runJob } from "../src/services/job-runner.service.js";
+import {
+    JOB_NAMES,
+    listJobs,
+    runAllJobs,
+    runJob
+} from "../src/services/job-runner.service.js";
 
 const objectId = () => new mongoose.Types.ObjectId();
 
@@ -163,4 +169,62 @@ test("the fee reminder job skips safely when email delivery is not configured", 
 
 test("unknown scheduled jobs are rejected", async () => {
     await assert.rejects(runJob("not_a_job"), { statusCode: 404 });
+});
+
+test("student media cleanup is registered as a manual-only daily job", () => {
+    const jobs = listJobs();
+
+    const cleanup = jobs.find((job) => job.name === JOB_NAMES.STUDENT_MEDIA_CLEANUP);
+    assert.ok(cleanup, "student_media_cleanup must be registered");
+    assert.equal(cleanup.daily, true);
+    assert.equal(cleanup.manualOnly, true);
+
+    for (const name of [JOB_NAMES.FEE_REMINDERS, JOB_NAMES.SUBSCRIPTION_EXPIRY]) {
+        const job = jobs.find((entry) => entry.name === name);
+        assert.ok(job, `${name} must be registered`);
+        assert.equal(job.manualOnly, false);
+    }
+});
+
+test("runAllJobs never invokes the manual-only student media cleanup job", async (t) => {
+    const claimedNames = [];
+    const createdNames = [];
+    t.mock.method(JobRun, "findOneAndUpdate", async (filter) => {
+        claimedNames.push(filter.name);
+        return { _id: objectId() };
+    });
+    t.mock.method(JobRun, "create", async (doc) => {
+        createdNames.push(doc.name);
+        return doc;
+    });
+    t.mock.method(JobRun, "updateOne", async () => ({ modifiedCount: 1 }));
+    t.mock.method(School, "find", () => ({ select: () => leanQuery([]) }));
+
+    const results = await runAllJobs({ force: true });
+
+    assert.deepEqual(
+        results.map((result) => result.name),
+        [JOB_NAMES.FEE_REMINDERS, JOB_NAMES.SUBSCRIPTION_EXPIRY]
+    );
+    assert.equal(results.some((result) => result.name === JOB_NAMES.STUDENT_MEDIA_CLEANUP), false);
+    assert.equal(claimedNames.includes(JOB_NAMES.STUDENT_MEDIA_CLEANUP), false);
+    assert.equal(createdNames.includes(JOB_NAMES.STUDENT_MEDIA_CLEANUP), false);
+});
+
+test("student media cleanup is accepted when explicitly invoked", async (t) => {
+    const claimedNames = [];
+    t.mock.method(JobRun, "findOneAndUpdate", async (filter) => {
+        claimedNames.push(filter.name);
+        return { _id: objectId() };
+    });
+    t.mock.method(JobRun, "updateOne", async () => ({ modifiedCount: 1 }));
+    // No pending cleanup tasks: the cleanup loop exits immediately without DB access.
+    t.mock.method(StudentMediaCleanupTask, "findOneAndUpdate", () => leanQuery(null));
+    t.mock.method(StudentMediaCleanupTask, "countDocuments", async () => 0);
+
+    const result = await runJob(JOB_NAMES.STUDENT_MEDIA_CLEANUP, { force: true });
+
+    assert.equal(result.skipped, false);
+    assert.deepEqual(result.result, { claimed: 0, done: 0, retried: 0, failed: 0, remaining: 0 });
+    assert.deepEqual(claimedNames, [JOB_NAMES.STUDENT_MEDIA_CLEANUP]);
 });

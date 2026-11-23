@@ -6,6 +6,8 @@ import ModuleHeader from "../components/ModuleHeader.jsx";
 import { notify, confirmDanger } from "../components/feedback/appFeedback.js";
 import { EmptyState, ErrorState, LoadingState, SkeletonRows } from "../components/feedback.jsx";
 import { exportCsv } from "../utils/export.js";
+import { useAuth } from "../auth/AuthProvider.jsx";
+import { getCurrencyConfig } from "../utils/currency.js";
 
 const currentPeriod = new Date().toISOString().slice(0, 7);
 const fields = [
@@ -13,14 +15,15 @@ const fields = [
   { name: "name", label: "Asset name", required: true },
   { name: "category", label: "Category", required: true },
   { name: "acquisitionDate", label: "Acquired on", type: "date", required: true },
-  { name: "costMinor", label: "Cost (minor currency units)", type: "number", min: 1, required: true },
-  { name: "salvageValueMinor", label: "Salvage value (minor units)", type: "number", min: 0, required: true, defaultValue: "0" },
-  { name: "currency", label: "Currency", required: true, defaultValue: "USD" },
+  { name: "costMinor", label: "Cost (smallest currency units)", type: "number", min: 1, required: true },
+  { name: "salvageValueMinor", label: "Salvage value (smallest currency units)", type: "number", min: 0, required: true, defaultValue: "0" },
   { name: "usefulLifeMonths", label: "Useful life (months)", type: "number", min: 1, required: true },
   { name: "location", label: "Location" }
 ];
 
 export default function FixedAssetsPage() {
+  const { school } = useAuth();
+  const schoolCurrency = school?.currency?.code || school?.baseCurrency || "USD";
   const [assets, setAssets] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [page, setPage] = useState(1);
@@ -46,6 +49,7 @@ export default function FixedAssetsPage() {
     const form = Object.fromEntries(new FormData(event.currentTarget));
     const body = {
       ...form,
+      currency: schoolCurrency,
       costMinor: Number(form.costMinor),
       salvageValueMinor: Number(form.salvageValueMinor),
       usefulLifeMonths: Number(form.usefulLifeMonths),
@@ -113,8 +117,8 @@ export default function FixedAssetsPage() {
 
   return <>
     <ModuleHeader title="Fixed assets" description="Maintain an auditable register, assignments, and straight-line depreciation." icon={Archive} action={<><button className="button button-outline" onClick={exportAssets}><Download size={15} />Export CSV</button><button className="button button-primary" onClick={() => setDialog({ type: "create" })}><Plus size={16} />Record asset</button></>} />
-    <section className="content-card table-card"><div className="table-toolbar"><div><strong>Asset register</strong><span>{pagination?.total ?? assets.length} records · values stored in minor currency units</span></div></div>
-      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={() => load()} /> : assets.length ? <div className="table-scroll"><table><thead><tr><th>Asset tag</th><th>Asset</th><th>Category</th><th>Acquired</th><th>Cost</th><th>Useful life</th><th>Status</th><th>Actions</th></tr></thead><tbody className="motion-stagger">{assets.map((asset) => <tr key={asset._id}><td><strong>{asset.assetTag}</strong></td><td>{asset.name}<div className="muted">{asset.location || "—"}</div></td><td>{asset.category}</td><td>{new Date(asset.acquisitionDate).toLocaleDateString()}</td><td>{money(asset.costMinor, asset.currency)}</td><td>{asset.usefulLifeMonths} months</td><td><span className={`badge badge-${asset.status}`}>{asset.status}</span></td><td><div className="row-actions"><button aria-label={`Assign asset ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "assign", asset })}><UserRound size={15} /></button><button aria-label={`Record depreciation for ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "depreciation", asset })}><Wallet size={15} /></button><button aria-label={`View history for ${asset.assetTag}`} className="icon-action" onClick={() => openHistory(asset)}><Archive size={15} /></button><button aria-label={`Release assignment for ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "release", asset })}><RotateCcw size={15} /></button><button aria-label={`Dispose asset ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => confirmDanger({
+    <section className="content-card table-card"><div className="table-toolbar"><div><strong>Asset register</strong><span>{pagination?.total ?? assets.length} records · {schoolCurrency}</span></div></div>
+      {loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={() => load()} /> : assets.length ? <div className="table-scroll"><table><thead><tr><th>Asset tag</th><th>Asset</th><th>Category</th><th>Acquired</th><th>Cost</th><th>Useful life</th><th>Status</th><th>Actions</th></tr></thead><tbody className="motion-stagger">{assets.map((asset) => <tr key={asset._id}><td><strong>{asset.assetTag}</strong></td><td>{asset.name}<div className="muted">{asset.location || "—"}</div></td><td>{asset.category}</td><td>{new Date(asset.acquisitionDate).toLocaleDateString()}</td><td>{money(asset.costMinor, asset.currency, asset.currencyExponent)}</td><td>{asset.usefulLifeMonths} months</td><td><span className={`badge badge-${asset.status}`}>{asset.status}</span></td><td><div className="row-actions"><button aria-label={`Assign asset ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "assign", asset })}><UserRound size={15} /></button><button aria-label={`Record depreciation for ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "depreciation", asset })}><Wallet size={15} /></button><button aria-label={`View history for ${asset.assetTag}`} className="icon-action" onClick={() => openHistory(asset)}><Archive size={15} /></button><button aria-label={`Release assignment for ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => setDialog({ type: "release", asset })}><RotateCcw size={15} /></button><button aria-label={`Dispose asset ${asset.assetTag}`} className="icon-action" disabled={asset.status !== "active"} onClick={() => confirmDanger({
           title: `Dispose asset ${asset.assetTag}?`,
           message: "The asset will be marked disposed, and future assignment or depreciation will be prevented. Existing history will remain available.",
           confirmText: "Dispose asset",
@@ -126,13 +130,13 @@ export default function FixedAssetsPage() {
     </section>
     {dialog?.type === "create" && <AssetForm title="Record fixed asset" busy={busy} onClose={() => setDialog(null)} onSubmit={submitCreate} />}
     {dialog && ["assign", "release", "depreciation"].includes(dialog.type) && <ActionForm dialog={dialog} busy={busy} onClose={() => setDialog(null)} onSubmit={submitAction} />}
-    {dialog?.type === "history" && <Modal title={`Asset history · ${dialog.asset.assetTag}`} onClose={() => setDialog(null)}>{dialog.loading ? <LoadingState label="Loading asset history" /> : dialog.error ? <ErrorState error={{ message: dialog.error }} onRetry={() => openHistory(dialog.asset)} /> : <div className="asset-history"><h3>Assignments</h3>{dialog.history?.assignments?.length ? dialog.history.assignments.map((entry) => <div className="history-row" key={entry._id}><span className={`badge badge-${entry.action === "assigned" ? "active" : "expired"}`}>{entry.action}</span><span>{entry.assigneeType} · {entry.assigneeId}</span><small>{new Date(entry.occurredAt).toLocaleString()}</small></div>) : <p className="muted">No assignment history.</p>}<h3>Depreciation</h3>{dialog.history?.depreciation?.length ? dialog.history.depreciation.map((entry) => <div className="history-row" key={entry._id}><strong>{entry.period}</strong><span>{money(entry.amountMinor, dialog.asset.currency)}</span><small>Accumulated {money(entry.accumulatedMinor, dialog.asset.currency)}</small></div>) : <p className="muted">No depreciation recorded.</p>}</div>}</Modal>}
+    {dialog?.type === "history" && <Modal title={`Asset history · ${dialog.asset.assetTag}`} onClose={() => setDialog(null)}>{dialog.loading ? <LoadingState label="Loading asset history" /> : dialog.error ? <ErrorState error={{ message: dialog.error }} onRetry={() => openHistory(dialog.asset)} /> : <div className="asset-history"><h3>Assignments</h3>{dialog.history?.assignments?.length ? dialog.history.assignments.map((entry) => <div className="history-row" key={entry._id}><span className={`badge badge-${entry.action === "assigned" ? "active" : "expired"}`}>{entry.action}</span><span>{entry.assigneeType} · {entry.assigneeId}</span><small>{new Date(entry.occurredAt).toLocaleString()}</small></div>) : <p className="muted">No assignment history.</p>}<h3>Depreciation</h3>{dialog.history?.depreciation?.length ? dialog.history.depreciation.map((entry) => <div className="history-row" key={entry._id}><strong>{entry.period}</strong><span>{money(entry.amountMinor, dialog.asset.currency, entry.currencyExponent ?? dialog.asset.currencyExponent)}</span><small>Accumulated {money(entry.accumulatedMinor, dialog.asset.currency, entry.currencyExponent ?? dialog.asset.currencyExponent)}</small></div>) : <p className="muted">No depreciation recorded.</p>}</div>}</Modal>}
   </>;
 }
 
 function AssetForm({ title, busy, onClose, onSubmit }) {
   const [dirty, setDirty] = useState(false);
-  return <Modal title={title} onClose={onClose} dirty={dirty && !busy} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={onSubmit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}><p className="form-help">Straight-line depreciation is calculated from acquisition cost less salvage value. Enter currency in the smallest unit (for example, cents).</p><div className="form-grid">{fields.map((field) => <label key={field.name}>{field.label}{field.required && <span className="required"> *</span>}<input name={field.name} type={field.type || "text"} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} required={field.required} /></label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Record asset"}</button></div></form></Modal>;
+  return <Modal title={title} onClose={onClose} dirty={dirty && !busy} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={onSubmit} onChange={() => setDirty(true)} onInput={() => setDirty(true)}><p className="form-help">Straight-line depreciation is calculated from acquisition cost less salvage value. Enter amounts in the school's smallest currency unit for the configured base currency.</p><div className="form-grid">{fields.map((field) => <label key={field.name}>{field.label}{field.required && <span className="required"> *</span>}<input name={field.name} type={field.type || "text"} min={field.min} max={field.max} defaultValue={field.defaultValue || ""} required={field.required} /></label>)}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Record asset"}</button></div></form></Modal>;
 }
 
 function ActionForm({ dialog, busy, onClose, onSubmit }) {
@@ -166,4 +170,11 @@ function ActionForm({ dialog, busy, onClose, onSubmit }) {
   </form></Modal>;
 }
 
-function money(value, currency) { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "USD" }).format((value || 0) / 100); }
+function money(value, currency, exponent) {
+  const code = String(currency || "USD").toUpperCase();
+  const cfg = getCurrencyConfig(code);
+  const digits = Number.isInteger(exponent) ? exponent : (cfg?.fractionDigits ?? 2);
+  const factor = 10 ** digits;
+  try { return new Intl.NumberFormat(undefined, { style: "currency", currency: cfg ? code : "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }).format((Number(value) || 0) / factor); }
+  catch { return `${((Number(value) || 0) / factor).toFixed(digits)} ${code}`; }
+}

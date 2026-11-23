@@ -4,6 +4,14 @@ import { describeErrorForDevelopment } from "../utils/error-diagnostics.js";
 export const notFound = (req, res, next) =>
     next(new HttpError(404, "The requested route was not found"));
 
+const isTransactionUnsupported = (error) => {
+    const text = String(error?.message ?? "");
+    return error?.code === 20
+        || error?.codeName === "IllegalOperation"
+        || /Transaction numbers are only allowed on a replica set member or mongos/i.test(text)
+        || /does not support (?:multi-document )?transactions/i.test(text);
+};
+
 export const errorHandler = (error, req, res, next) => {
     if (res.headersSent) {
         return next(error);
@@ -11,6 +19,7 @@ export const errorHandler = (error, req, res, next) => {
 
     let statusCode = error.statusCode ?? error.status ?? 500;
     let message = error.message;
+    let safeMessage = false;
 
     if (error.name === "ZodError") {
         statusCode = 400;
@@ -33,6 +42,12 @@ export const errorHandler = (error, req, res, next) => {
     } else if (error.message === "Origin is not allowed by CORS") {
         statusCode = 403;
         message = "Request origin is not allowed";
+    } else if (isTransactionUnsupported(error)) {
+        // Standalone MongoDB cannot run the transactions required by writes.
+        // Report an actionable 503 instead of an opaque 500.
+        statusCode = 503;
+        message = "This operation requires a database that supports transactions";
+        safeMessage = true;
     }
 
     if (statusCode >= 500) {
@@ -44,7 +59,7 @@ export const errorHandler = (error, req, res, next) => {
         } else {
             console.error("Unhandled API error", error.name ?? "Error");
         }
-        message = "An unexpected server error occurred";
+        if (!safeMessage) message = "An unexpected server error occurred";
     }
 
     return res.status(statusCode).json({

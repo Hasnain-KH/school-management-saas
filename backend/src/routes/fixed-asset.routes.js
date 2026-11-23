@@ -2,6 +2,7 @@ import express from "express";
 import * as controller from "../controllers/fixed-asset.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { requirePermission, requirePlanFeature, requireTenant } from "../middleware/authorization.middleware.js";
+import { requireConfiguredSchoolCurrency } from "../middleware/school-currency.middleware.js";
 import { paginationSchema, validate } from "../validators/common.validator.js";
 import {
     fixedAssetAssignmentSchema,
@@ -13,7 +14,7 @@ import {
 } from "../validators/fixed-asset.validator.js";
 
 const router = express.Router();
-router.use(requireAuth, requireTenant, requirePlanFeature("inventory"));
+router.use(requireAuth, requireTenant, requirePlanFeature("inventory"), requireConfiguredSchoolCurrency({ mutationsOnly: true }));
 router.get("/", requirePermission("operations:read"), validate(fixedAssetQuerySchema, "query"), controller.list);
 router.post("/", requirePermission("operations:manage"), validate(fixedAssetCreateSchema), controller.create);
 router.post("/:assetId/assignments", requirePermission("operations:manage"), validate(fixedAssetParamsSchema, "params"), validate(fixedAssetAssignmentSchema), controller.assign);

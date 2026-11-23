@@ -2,6 +2,9 @@ import { RedisStore } from "rate-limit-redis";
 import { createClient } from "redis";
 import { HttpError } from "../utils/http-error.js";
 
+const REDIS_CONNECT_TIMEOUT_MS = 5000;
+const REDIS_COMMAND_TIMEOUT_MS = 5000;
+
 const unavailableError = () => new HttpError(503, "Shared rate limiting is temporarily unavailable");
 
 const unavailableStore = () => ({
@@ -46,7 +49,8 @@ const createRedisTransport = (redisUrl, redisClientFactory) => {
         url: redisUrl,
         socket: {
             // Bound reconnects so failed Redis operations reach the existing 503 path promptly.
-            reconnectStrategy: (retries) => retries < 2 ? 100 : false
+            reconnectStrategy: (retries) => retries < 2 ? 100 : false,
+            connectTimeout: REDIS_CONNECT_TIMEOUT_MS
         }
     });
     let connecting;
@@ -59,7 +63,13 @@ const createRedisTransport = (redisUrl, redisClientFactory) => {
                 connecting ??= client.connect().finally(() => { connecting = undefined; });
                 await connecting;
             }
-            return await client.sendCommand(command);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), REDIS_COMMAND_TIMEOUT_MS);
+            try {
+                return await client.sendCommand(command, { abortSignal: controller.signal });
+            } finally {
+                clearTimeout(timeout);
+            }
         } catch {
             throw unavailableError();
         }
@@ -106,6 +116,8 @@ export const createLimiterStores = ({
 
     return {
         apiStore: createStore("api"),
-        authStore: createStore("auth")
+        authStore: createStore("auth"),
+        uploadStore: createStore("upload"),
+        reviewStore: createStore("review")
     };
 };

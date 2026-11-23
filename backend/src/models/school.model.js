@@ -44,6 +44,18 @@ const schoolSchema = new mongoose.Schema(
             attendanceLateGraceMinutes: { type: Number, min: 0, max: 180, default: 10 },
             attendanceStartTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, default: "08:00" }
         },
+        // One school = one base currency for school-owned financial operations.
+        // Platform SaaS billing remains separate and is not controlled by this field.
+        baseCurrency: { type: String, uppercase: true, trim: true, match: /^[A-Z]{3}$/ },
+        // ISO 4217 minor-unit exponent for the configured base currency. Stored explicitly for auditability.
+        baseCurrencyExponent: { type: Number, min: 0, max: 3 },
+        currencyConfiguredAt: { type: Date },
+        currencyConfiguredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        currencyConfigurationStatus: {
+            type: String,
+            enum: ["unconfigured", "configured"],
+            default: "unconfigured"
+        },
         // Metadata only. Image bytes are stored in the durable object store.
         logo: {
             storageKey: { type: String, trim: true, maxlength: 512 },

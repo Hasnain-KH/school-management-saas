@@ -162,7 +162,9 @@ test("registration and school updates reject invalid and tenant-injected fields"
         schoolName: "Example School",
         email: "ADMIN@EXAMPLE.COM",
         adminName: "School Admin",
-        password: "a-secure-password-123"
+        password: "a-secure-password-123",
+        baseCurrency: "USD",
+        currencyConfirmed: true
     }).success, true);
     assert.equal(schoolRegistrationSchema.safeParse({
         schoolName: "Example School",
@@ -1665,7 +1667,7 @@ test("fee schema validation rejects invalid periods, discounts, currencies, and 
 test("fee categories and structures derive tenant context and verify category ownership", async (t) => {
     const schoolId = "64a000000000000000000001";
     const req = {
-        school: { _id: schoolId },
+        school: { _id: schoolId, baseCurrency: "USD", currencyConfigurationStatus: "configured" },
         user: { _id: "64a000000000000000000002", schoolId }
     };
     const transaction = {

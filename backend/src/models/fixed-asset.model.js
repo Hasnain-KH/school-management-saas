@@ -10,6 +10,8 @@ const fixedAssetSchema = new mongoose.Schema(
         costMinor: { type: Number, required: true, min: 1 },
         salvageValueMinor: { type: Number, required: true, min: 0 },
         currency: { type: String, required: true, uppercase: true, match: /^[A-Z]{3}$/ },
+        // Explicit minor-unit exponent used when monetary values were stored. Default 2 preserves legacy hundredths records.
+        currencyExponent: { type: Number, min: 0, max: 3, default: 2, required: true },
         usefulLifeMonths: { type: Number, required: true, min: 1, max: 1200 },
         depreciationMethod: { type: String, enum: ["straight_line"], default: "straight_line", required: true },
         location: { type: String, trim: true, maxlength: 120 },

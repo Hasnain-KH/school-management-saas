@@ -7,6 +7,7 @@ import { getDocumentStorageProvider, getDocumentStorageProviderName } from "./do
 import { getLinkedStudentIds } from "./parent-portal.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
+import { detectFileSignature, isDeclaredTypeCompatible } from "../utils/file-signature.js";
 
 const assertTenant = (req) => {
     if (!req.user?.schoolId || !req.school
@@ -57,6 +58,9 @@ export const createDocument = async (req, input) => {
     const storage = getDocumentStorageProvider();
     const buffer = Buffer.from(input.dataBase64, "base64");
     if (!buffer.length) throw new HttpError(400, "The uploaded file is empty");
+    if (!isDeclaredTypeCompatible(input.contentType, detectFileSignature(buffer))) {
+        throw new HttpError(400, "The file content does not match the declared file type");
+    }
 
     if (input.studentId) {
         const student = await Student.exists({ _id: input.studentId, schoolId });

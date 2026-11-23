@@ -28,7 +28,7 @@ From the repository root, run `npm test` for the backend suite, `npm run build` 
 
 ## Vercel deployment
 
-The Vercel configuration deploys the frontend and API together as a single project from the repository root (`outputDirectory: frontend/dist`, an SPA fallback rewrite, and `api/[...path].mjs` as the Express function). Configure backend environment variables — including a Redis-compatible shared rate-limit URL — in Vercel. See the [Vercel deployment guide](./docs/DEPLOYMENT-VERCEL.md). No live Vercel deployment has been verified from this repository.
+The Vercel configuration deploys the frontend and API together as a single project from the repository root (`outputDirectory: frontend/dist`, an SPA fallback rewrite, and `api/index.mjs` as the Express function). Configure backend environment variables — including a Redis-compatible shared rate-limit URL — in Vercel. See the [Vercel deployment guide](./docs/DEPLOYMENT-VERCEL.md). No live Vercel deployment has been verified from this repository.
 
 ## Workspaces and documentation
 

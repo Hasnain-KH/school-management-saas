@@ -6,7 +6,7 @@ const notificationSchema = new mongoose.Schema(
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
         type: {
             type: String,
-            enum: ["attendance", "fee", "payment", "result", "homework", "announcement", "leave", "general"],
+            enum: ["attendance", "fee", "payment", "result", "homework", "announcement", "leave", "general", "media", "consent"],
             required: true
         },
         title: { type: String, required: true, trim: true, maxlength: 160 },

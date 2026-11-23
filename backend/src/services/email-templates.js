@@ -1,3 +1,5 @@
+import { formatMoney as formatCurrencyMoney } from "../utils/currency.js";
+
 const escapeHtml = (value) =>
     String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -33,24 +35,30 @@ export const emailVerificationTemplate = ({ token }) => {
     const link = `${appBaseUrl()}/verify-email?token=${encodeURIComponent(token)}`;
     return {
         subject: "Verify your SchoolFlow email",
-        html: layout("Verify your email", `<p>Confirm your email address to activate your SchoolFlow account.</p>${button(link, "Verify email")}`),
-        text: `Verify your SchoolFlow email: ${link}`
+        html: layout("Verify your email", `<p>Confirm your email address to activate your SchoolFlow account. This link expires in 30 minutes and can only be used once.</p>${button(link, "Verify email")}`),
+        text: `Verify your SchoolFlow email: ${link}\nThis link expires in 30 minutes and can only be used once.`
     };
 };
 
-const formatMoney = (minor, currency) => {
-    const amount = (Number(minor ?? 0) / 100).toFixed(2);
-    return `${currency ?? ""} ${amount}`.trim();
+const formatMoney = (minor, currency, currencyExponent) => {
+    const digits = Number.isInteger(currencyExponent) ? currencyExponent : undefined;
+    try {
+        return formatCurrencyMoney(Number(minor ?? 0), currency || "USD", "en-US", digits);
+    } catch {
+        const amount = Number(minor ?? 0) / (10 ** (digits ?? 2));
+        return `${currency ?? ""} ${amount.toFixed(digits ?? 2)}`.trim();
+    }
 };
 
-export const overdueFeeReminderTemplate = ({ guardianName, period, dueDate, balanceMinor, currency }) => {
+export const overdueFeeReminderTemplate = ({ guardianName, period, dueDate, balanceMinor, currency, currencyExponent }) => {
     const due = dueDate ? new Date(dueDate).toISOString().slice(0, 10) : "an earlier date";
+    const formatted = formatMoney(balanceMinor, currency, currencyExponent);
     return {
         subject: `School fee reminder — ${period ?? "outstanding balance"}`,
         html: layout("School fee reminder", `<p>Dear ${escapeHtml(guardianName ?? "Guardian")},</p>
-      <p>Our records show an outstanding school fee balance of <strong>${escapeHtml(formatMoney(balanceMinor, currency))}</strong> for <strong>${escapeHtml(period ?? "the current period")}</strong>, which was due on ${escapeHtml(due)}.</p>
+      <p>Our records show an outstanding school fee balance of <strong>${escapeHtml(formatted)}</strong> for <strong>${escapeHtml(period ?? "the current period")}</strong>, which was due on ${escapeHtml(due)}.</p>
       <p>Please contact the school office to settle this balance at your earliest convenience.</p>`),
-        text: `Outstanding fee balance of ${formatMoney(balanceMinor, currency)} for ${period ?? "the current period"} due ${due}.`
+        text: `Outstanding fee balance of ${formatted} for ${period ?? "the current period"} due ${due}.`
     };
 };
 

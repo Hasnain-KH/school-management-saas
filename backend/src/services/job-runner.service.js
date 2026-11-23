@@ -3,6 +3,7 @@ import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
 import { isEmailDeliveryConfigured } from "./email-delivery.provider.js";
 import { dispatchSchoolOverdueFeeReminders } from "./fee-reminder.service.js";
+import { runStudentMediaCleanup } from "./student-media.service.js";
 import { HttpError } from "../utils/http-error.js";
 
 const LEASE_MS = 15 * 60 * 1000;
@@ -10,7 +11,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const JOB_NAMES = Object.freeze({
     FEE_REMINDERS: "fee_reminders",
-    SUBSCRIPTION_EXPIRY: "subscription_expiry"
+    SUBSCRIPTION_EXPIRY: "subscription_expiry",
+    // Explicit invocation only: never add this to an automatic scheduler.
+    STUDENT_MEDIA_CLEANUP: "student_media_cleanup"
 });
 
 const utcDateKey = (date) => date.toISOString().slice(0, 10);
@@ -119,13 +122,18 @@ const runSubscriptionExpiry = async ({ now = new Date() } = {}) => {
 
 const JOB_DEFINITIONS = {
     [JOB_NAMES.FEE_REMINDERS]: { run: runFeeReminders, daily: true },
-    [JOB_NAMES.SUBSCRIPTION_EXPIRY]: { run: runSubscriptionExpiry, daily: true }
+    [JOB_NAMES.SUBSCRIPTION_EXPIRY]: { run: runSubscriptionExpiry, daily: true },
+    [JOB_NAMES.STUDENT_MEDIA_CLEANUP]: { run: runStudentMediaCleanup, daily: true, manualOnly: true }
 };
 
 // --- Public API ------------------------------------------------------------
 
 export const listJobs = () =>
-    Object.entries(JOB_DEFINITIONS).map(([name, definition]) => ({ name, daily: definition.daily }));
+    Object.entries(JOB_DEFINITIONS).map(([name, definition]) => ({
+        name,
+        daily: definition.daily,
+        manualOnly: Boolean(definition.manualOnly)
+    }));
 
 export const runJob = async (name, { force = false, asOf } = {}) => {
     const definition = JOB_DEFINITIONS[name];
@@ -148,7 +156,9 @@ export const runJob = async (name, { force = false, asOf } = {}) => {
 
 export const runAllJobs = async (options = {}) => {
     const results = [];
-    for (const name of Object.keys(JOB_DEFINITIONS)) {
+    for (const [name, definition] of Object.entries(JOB_DEFINITIONS)) {
+        // Compensation work must only happen through an explicit operator call.
+        if (definition.manualOnly) continue;
         try {
             results.push(await runJob(name, options));
         } catch (error) {

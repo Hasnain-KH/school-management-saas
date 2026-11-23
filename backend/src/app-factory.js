@@ -12,6 +12,7 @@ import operationsRoutes from "./routes/operations.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import documentRoutes from "./routes/document.routes.js";
+import createStudentMediaRoutes from "./routes/student-media.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import platformRoutes from "./routes/platform.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
@@ -26,16 +27,18 @@ import studentRoutes from "./routes/student.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import { createRateLimitMiddlewares } from "./middleware/rate-limit.middleware.js";
 import { csrfProtection } from "./middleware/csrf.middleware.js";
-import { getAllowedOrigins } from "./config/env.js";
+import { getAllowedOrigins, getStorageUploadOrigins } from "./config/env.js";
 import { HttpError } from "./utils/http-error.js";
 import { errorHandler, notFound } from "./middleware/error.middleware.js";
+import { requestId } from "./middleware/request-id.middleware.js";
 
 export const createApp = ({ rateLimitOptions } = {}) => {
-    const { apiLimiter, authLimiter } = createRateLimitMiddlewares(rateLimitOptions);
+    const { apiLimiter, authLimiter, uploadLimiter, reviewLimiter } = createRateLimitMiddlewares(rateLimitOptions);
     const authRoutes = createAuthRouter(authLimiter);
     const app = express();
 
     app.disable("x-powered-by");
+    app.use(requestId);
     app.use(helmet({
         contentSecurityPolicy: {
             directives: {
@@ -44,7 +47,7 @@ export const createApp = ({ rateLimitOptions } = {}) => {
                 styleSrc: ["'self'", "'unsafe-inline'"],
                 imgSrc: ["'self'", "data:"],
                 fontSrc: ["'self'", "data:"],
-                connectSrc: ["'self'", ...getAllowedOrigins()],
+                connectSrc: ["'self'", ...getAllowedOrigins(), ...getStorageUploadOrigins()],
                 objectSrc: ["'none'"],
                 baseUri: ["'self'"],
                 frameAncestors: ["'none'"]
@@ -62,11 +65,13 @@ export const createApp = ({ rateLimitOptions } = {}) => {
     }));
     app.use(cookieParser());
     app.use(csrfProtection);
-    // Document and logo uploads carry base64 payloads, so they need a larger
-    // JSON body limit. Mounting these before the global parser lets them win.
+    // Document, logo, and student media uploads carry base64 payloads, so they
+    // need larger JSON body limits. Mounting these before the global parser lets them win.
     app.use("/api/v1/documents", express.json({ limit: "8mb" }));
     // A 2 MB logo expands to roughly 2.7 MB of base64.
     app.use("/api/v1/schools/me/logo", express.json({ limit: "3mb" }));
+    // Student media supports video up to 25MB; base64 adds ~33% overhead.
+    app.use("/api/v1/student-media", express.json({ limit: "38mb" }));
     // Gateway webhooks must be verified against the exact bytes the provider
     // signed, so capture the raw body for that path before the JSON parser.
     app.use("/api/v1/payments/webhook", express.raw({ type: "*/*", limit: "200kb" }));
@@ -89,6 +94,7 @@ export const createApp = ({ rateLimitOptions } = {}) => {
     app.use("/api/v1/operations/assets", fixedAssetRoutes);
     app.use("/api/v1/notifications", notificationRoutes);
     app.use("/api/v1/documents", documentRoutes);
+    app.use("/api/v1/student-media", createStudentMediaRoutes({ uploadLimiter, reviewLimiter }));
     app.use("/api/v1/jobs", jobRoutes);
     app.use("/api/v1/reports", reportsRoutes);
     app.use("/api/v1/users", userRoutes);

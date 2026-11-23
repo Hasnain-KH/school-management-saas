@@ -90,11 +90,11 @@ export const createHttpEmailProvider = ({
         async sendEmailVerification({ email, token }) {
             return send({ to: email, template: emailVerificationTemplate({ token }) });
         },
-        async sendOverdueFeeReminder({ to, guardianName, period, dueDate, balanceMinor, currency, idempotencyKey }) {
+        async sendOverdueFeeReminder({ to, guardianName, period, dueDate, balanceMinor, currency, currencyExponent, idempotencyKey }) {
             return send({
                 to,
                 idempotencyKey,
-                template: overdueFeeReminderTemplate({ guardianName, period, dueDate, balanceMinor, currency })
+                template: overdueFeeReminderTemplate({ guardianName, period, dueDate, balanceMinor, currency, currencyExponent })
             });
         },
         async sendWelcome({ email, name, schoolName }) {

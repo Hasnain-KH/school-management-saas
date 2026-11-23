@@ -7,6 +7,7 @@ import RefreshSession from "../models/refresh-session.model.js";
 import School from "../models/school.model.js";
 import SubscriptionPlan from "../models/subscription-plan.model.js";
 import { toPublicLogo } from "../utils/school-logo.js";
+import { getCurrencyConfig, getCurrencyFractionDigits, validateCurrencyCode } from "../utils/currency.js";
 import { requestEmailVerification } from "./account-security.service.js";
 import {
     requiresEmailVerification,
@@ -34,19 +35,31 @@ const toPublicUser = (user) => ({
     emailVerified: Boolean(user.emailVerifiedAt)
 });
 
-export const toPublicSchool = (school) => ({
-    id: school._id.toString(),
-    name: school.name,
-    slug: school.slug,
-    email: school.email,
-    phone: school.phone,
-    address: school.address,
-    status: school.status,
-    subscription: school.subscription,
-    branches: school.branches,
-    settings: school.settings,
-    logo: toPublicLogo(school.logo)
-});
+export const toPublicSchool = (school) => {
+    const currency = getCurrencyConfig(school.baseCurrency);
+    return {
+        id: school._id.toString(),
+        name: school.name,
+        slug: school.slug,
+        email: school.email,
+        phone: school.phone,
+        address: school.address,
+        status: school.status,
+        subscription: school.subscription,
+        branches: school.branches,
+        settings: school.settings,
+        baseCurrency: school.baseCurrency || null,
+        currency: currency ? {
+            code: currency.code,
+            name: currency.name,
+            symbol: currency.symbol,
+            fractionDigits: currency.fractionDigits
+        } : null,
+        currencyConfiguredAt: school.currencyConfiguredAt || null,
+        currencyConfigurationStatus: school.currencyConfigurationStatus || "unconfigured",
+        logo: toPublicLogo(school.logo)
+    };
+};
 
 const createTokenPair = async (user, schoolId, session, familyId = randomUUID()) => {
     const {
@@ -126,12 +139,17 @@ export const registerSchool = async (input) => {
                 throw new HttpError(400, "School name must produce a slug of at least 3 characters");
             }
 
+            const baseCurrency = validateCurrencyCode(input.baseCurrency);
             const school = new School({
                 name: input.schoolName,
                 slug,
                 email: input.email,
                 phone: input.phone,
                 status: "trial",
+                baseCurrency,
+                baseCurrencyExponent: getCurrencyFractionDigits(baseCurrency),
+                currencyConfigurationStatus: "configured",
+                currencyConfiguredAt: new Date(),
                 subscription: {
                     planId: trialPlan._id,
                     plan: trialPlan.code,
@@ -153,6 +171,8 @@ export const registerSchool = async (input) => {
                 emailVerificationRequired: verificationRequired
             });
             await user.save({ session });
+            school.currencyConfiguredBy = user._id;
+            await school.save({ session });
             await recordRegistration(school, user, session);
 
             // When verification is required, no authenticated session is created

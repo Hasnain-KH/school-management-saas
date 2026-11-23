@@ -19,6 +19,8 @@ const feeVoucherSchema = new mongoose.Schema(
         period: { type: String, required: true, match: /^\d{4}(?:-(0[1-9]|1[0-2]))?$/ },
         dueDate: { type: Date, required: true },
         currency: { type: String, uppercase: true, match: /^[A-Z]{3}$/, required: true },
+        // Explicit minor-unit exponent used when amounts were stored. Default 2 preserves legacy hundredths records.
+        currencyExponent: { type: Number, min: 0, max: 3, default: 2, required: true },
         lineItems: { type: [voucherLineSchema], required: true },
         grossAmountMinor: { type: Number, required: true, min: 1 },
         discountAmountMinor: { type: Number, required: true, min: 0 },

@@ -9,6 +9,7 @@ import ModuleHeader from "../components/ModuleHeader.jsx";
 import { EmptyState, ErrorState, LoadingState, Notice, SkeletonRows } from "../components/feedback.jsx";
 import SchoolLogoManager from "./SchoolLogoManager.jsx";
 import { exportCsv, exportExcel, printPdf } from "../utils/export.js";
+import { getCurrencyConfig, getCurrencyFractionDigits, fromMinorUnits, parseMoneyInput } from "../utils/currency.js";
 import { buildStudentAttendancePayload, lateStudentsMissingCheckIn, normalizeAttendanceRoster } from "../utils/attendance-roster.js";
 import { buildExamPayload } from "../utils/exam-payload.js";
 import { buildFeeAssignmentPayload, buildVoucherGenerationPayload } from "../utils/finance-workflows.js";
@@ -323,7 +324,7 @@ function FinancePage() {
   const [tab, setTab] = useState("vouchers"); const [items, setItems] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [paying, setPaying] = useState(null); const [setup, setSetup] = useState(""); const [busy, setBusy] = useState(false);
   const load = async () => { setLoading(true); setError(""); try { const path = tab === "vouchers" ? "/finance/vouchers?outstandingOnly=true&limit=100" : tab === "categories" ? "/finance/categories?limit=100" : tab === "assignments" ? "/finance/assignments?limit=100" : "/finance/structures?limit=100"; const result = await get(path); setItems(result.items || []); } catch (reason) { setError(reason.message); } finally { setLoading(false); } };
   useEffect(() => { load(); }, [tab]);
-  const collect = async (event) => { event.preventDefault(); if (busy) return; setBusy(true); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await post(`/finance/vouchers/${paying._id}/payments`, { idempotencyKey: crypto.randomUUID(), amountMinor: Math.round(Number(values.amount) * 100), method: values.method, reference: values.reference || undefined }); setPaying(null); await load(); notify.success("Payment recorded. A receipt is available in the transaction history."); } catch (reason) { notify.error(reason, { title: "Could not record payment." }); } finally { setBusy(false); } };
+  const collect = async (event) => { event.preventDefault(); if (busy) return; setBusy(true); const values = Object.fromEntries(new FormData(event.currentTarget)); try { const currency = paying.currency || school?.currency?.code || school?.baseCurrency || "USD"; const amountMinor = parseMoneyInput(values.amount, currency); if (amountMinor == null || amountMinor < 1) throw new Error("Enter a valid payment amount."); await post(`/finance/vouchers/${paying._id}/payments`, { idempotencyKey: crypto.randomUUID(), amountMinor, method: values.method, reference: values.reference || undefined }); setPaying(null); await load(); notify.success("Payment recorded. A receipt is available in the transaction history."); } catch (reason) { notify.error(reason, { title: "Could not record payment." }); } finally { setBusy(false); } };
   const tabs = [["vouchers", "Outstanding vouchers"], ["structures", "Fee structures"], ["categories", "Categories"], ...(canManage ? [["assignments", "Student assignments"]] : [])];
   const startWorkflow = (value) => setSetup(value);
   const submitWorkflow = async (payload) => {
@@ -349,10 +350,12 @@ function FinancePage() {
   const columns = tab === "assignments"
     ? ["studentId", "feeStructureId", "startPeriod", "endPeriod", "discountAmountMinor", "discountBasisPoints", "scholarshipName", "isActive"]
     : ["period", "status", "amountDueMinor", "balanceMinor", "paidAmountMinor", "currency", "name", "code", "frequency"];
-  return <><PageHeader title="Fees & finance" description="Review fee balances, fee structures, and school collection activity." icon={CircleDollarSign} action={canManage && <>{["structures", "categories"].includes(tab) && <button className="button button-primary" onClick={() => startWorkflow(tab)}><Plus size={16} />Add {tab === "categories" ? "category" : "structure"}</button>}{tab === "assignments" && <button className="button button-primary" onClick={() => startWorkflow("assignment")}><Plus size={16} />Assign fees</button>}{tab === "vouchers" && <button className="button button-outline" onClick={() => startWorkflow("generate")}><Plus size={16} />Generate vouchers</button>}</>} /><section className="content-card table-card"><div className="tabs" role="group" aria-label="Finance record type">{tabs.map(([value, label]) => <button key={value} type="button" aria-pressed={tab === value} className={tab === value ? "tab active-tab" : "tab"} onClick={() => setTab(value)}>{label}</button>)}</div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll"><table><thead><tr>{columns.filter((key) => items.some((item) => item[key] !== undefined)).map((key) => <th key={key}>{columnLabel(key)}</th>)}{tab === "vouchers" && canManage && <th>Action</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id}>{columns.filter((key) => item[key] !== undefined).map((key) => <td key={key}>{key.endsWith("Minor") ? formatMinor(item[key], item.currency) : <Cell value={item[key]} column={key} />}</td>)}{tab === "vouchers" && canManage && <td><button className="button button-small button-primary" onClick={() => setPaying(item)}>Collect payment</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={`No ${tab} records`} detail="Fee records appear here once they are configured for this school." />}</section>{setup && ["categories", "structures"].includes(setup) && <FeeSetupModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={async (payload) => { if (busy) return; setBusy(true); try { await post(setup === "categories" ? "/finance/categories" : "/finance/structures", payload); setSetup(""); await load(); notify.success(`${setup === "categories" ? "Fee category" : "Fee structure"} created.`); } catch (reason) { notify.error(reason, { title: "Could not create fee setup record." }); } finally { setBusy(false); } }} />}{setup && ["assignment", "generate"].includes(setup) && <FeeWorkflowModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={submitWorkflow} />}{paying && <Modal title={`Collect payment · ${paying.period}`} onClose={() => setPaying(null)} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={collect}><p>Outstanding balance <strong>{formatMinor(paying.balanceMinor, paying.currency)}</strong></p><label>Amount<input name="amount" type="number" step="0.01" min="0.01" max={paying.balanceMinor / 100} required /></label><label>Payment method<select name="method">{["cash", "bank_transfer", "cheque", "other"].map((method) => <option key={method} value={method}>{method.replace("_", " ")}</option>)}</select></label><label>Reference <span className="optional">(optional)</span><input name="reference" maxLength="100" /></label><div className="modal-actions"><button type="button" className="button button-outline" onClick={() => setPaying(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div></form></Modal>}</>;
+  return <><PageHeader title="Fees & finance" description="Review fee balances, fee structures, and school collection activity." icon={CircleDollarSign} action={canManage && <>{["structures", "categories"].includes(tab) && <button className="button button-primary" onClick={() => startWorkflow(tab)}><Plus size={16} />Add {tab === "categories" ? "category" : "structure"}</button>}{tab === "assignments" && <button className="button button-primary" onClick={() => startWorkflow("assignment")}><Plus size={16} />Assign fees</button>}{tab === "vouchers" && <button className="button button-outline" onClick={() => startWorkflow("generate")}><Plus size={16} />Generate vouchers</button>}</>} /><section className="content-card table-card"><div className="tabs" role="group" aria-label="Finance record type">{tabs.map(([value, label]) => <button key={value} type="button" aria-pressed={tab === value} className={tab === value ? "tab active-tab" : "tab"} onClick={() => setTab(value)}>{label}</button>)}</div>{loading ? <SkeletonRows /> : error ? <ErrorState error={{ message: error }} onRetry={load} /> : items.length ? <div className="table-scroll"><table><thead><tr>{columns.filter((key) => items.some((item) => item[key] !== undefined)).map((key) => <th key={key}>{columnLabel(key)}</th>)}{tab === "vouchers" && canManage && <th>Action</th>}</tr></thead><tbody>{items.map((item) => <tr key={item._id}>{columns.filter((key) => item[key] !== undefined).map((key) => <td key={key}>{key.endsWith("Minor") ? formatMinor(item[key], item.currency, item.currencyExponent) : <Cell value={item[key]} column={key} />}</td>)}{tab === "vouchers" && canManage && <td><button className="button button-small button-primary" onClick={() => setPaying(item)}>Collect payment</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={`No ${tab} records`} detail="Fee records appear here once they are configured for this school." />}</section>{setup && ["categories", "structures"].includes(setup) && <FeeSetupModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={async (payload) => { if (busy) return; setBusy(true); try { await post(setup === "categories" ? "/finance/categories" : "/finance/structures", payload); setSetup(""); await load(); notify.success(`${setup === "categories" ? "Fee category" : "Fee structure"} created.`); } catch (reason) { notify.error(reason, { title: "Could not create fee setup record." }); } finally { setBusy(false); } }} />}{setup && ["assignment", "generate"].includes(setup) && <FeeWorkflowModal mode={setup} busy={busy} onClose={() => setSetup("")} onSubmit={submitWorkflow} />}{paying && <Modal title={`Collect payment · ${paying.period}`} onClose={() => setPaying(null)} closeBlocked={busy}><form className="form-stack modal-form" onSubmit={collect}><p>Outstanding balance <strong>{formatMinor(paying.balanceMinor, paying.currency)}</strong></p><label>Amount ({paying.currency || "currency"})<input name="amount" type="number" step={1 / (10 ** getCurrencyFractionDigits(paying.currency || school?.currency?.code || school?.baseCurrency || "USD"))} min={1 / (10 ** getCurrencyFractionDigits(paying.currency || school?.currency?.code || school?.baseCurrency || "USD"))} max={fromMinorUnits(paying.balanceMinor, paying.currency || school?.currency?.code || school?.baseCurrency || "USD")} required /></label><label>Payment method<select name="method">{["cash", "bank_transfer", "cheque", "other"].map((method) => <option key={method} value={method}>{method.replace("_", " ")}</option>)}</select></label><label>Reference <span className="optional">(optional)</span><input name="reference" maxLength="100" /></label><div className="modal-actions"><button type="button" className="button button-outline" onClick={() => setPaying(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Recording…" : "Record payment"}</button></div></form></Modal>}</>;
 }
 
 function FeeSetupModal({ mode, busy, onClose, onSubmit }) {
+  const { school } = useAuth();
+  const schoolCurrency = school?.currency?.code || school?.baseCurrency || "";
   const isCategory = mode === "categories";
   const [options, setOptions] = useState({ categories: [], sessions: [], classes: [] });
   const [optionsError, setOptionsError] = useState("");
@@ -385,7 +388,7 @@ function FeeSetupModal({ mode, busy, onClose, onSubmit }) {
       frequency: values.frequency,
       ...(values.dueDay ? { dueDay: Number(values.dueDay) } : {}),
       ...(values.frequency === "annual" ? { dueMonth: Number(values.dueMonth) } : {}),
-      currency: values.currency.toUpperCase(),
+      ...(schoolCurrency ? { currency: schoolCurrency } : {}),
       lineItems: lineItems.map((item) => ({ categoryId: item.categoryId, name: item.name, amountMinor: Number(item.amountMinor) }))
     });
   };
@@ -394,10 +397,11 @@ function FeeSetupModal({ mode, busy, onClose, onSubmit }) {
   return <Modal title={isCategory ? "Add fee category" : "Add fee structure"} onClose={onClose}><form className="form-stack modal-form" onSubmit={submit}>
     {isCategory ? <><label>Category name<input name="name" required maxLength={100} /></label><label>Code<input name="code" required maxLength={32} pattern="[A-Za-z0-9_-]+" /></label><label>Description<input name="description" maxLength={300} /></label></> : <>
       {optionsError && <ErrorState error={{ message: optionsError }} />}
-      <div className="form-grid"><label>Academic session<select name="academicSessionId" required defaultValue=""><option value="" disabled>Select a session</option>{options.sessions.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}</select></label><label>Class<select name="classId" required defaultValue=""><option value="" disabled>Select a class</option>{options.classes.map((item) => <option key={item._id} value={item._id}>{item.name} · {item.code}</option>)}</select></label><label>Structure name<input name="name" required minLength={2} maxLength={120} /></label><label>Code<input name="code" required maxLength={32} pattern="[A-Za-z0-9_-]+" /></label><label>Frequency<select name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="monthly">Monthly</option><option value="annual">Annual</option></select></label><label>Due day<input name="dueDay" type="number" min={1} max={28} defaultValue="10" /></label>{frequency === "annual" && <label>Due month<input name="dueMonth" type="number" min={1} max={12} required /></label>}<label>Currency<input name="currency" defaultValue="USD" required minLength={3} maxLength={3} pattern="[A-Za-z]{3}" /></label></div>
+      {!schoolCurrency && <div className="currency-lock-note" role="status">School base currency is not configured. An authorized school administrator must confirm it in Financial Settings before creating fee structures.</div>}
+      <div className="form-grid"><label>Academic session<select name="academicSessionId" required defaultValue=""><option value="" disabled>Select a session</option>{options.sessions.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}</select></label><label>Class<select name="classId" required defaultValue=""><option value="" disabled>Select a class</option>{options.classes.map((item) => <option key={item._id} value={item._id}>{item.name} · {item.code}</option>)}</select></label><label>Structure name<input name="name" required minLength={2} maxLength={120} /></label><label>Code<input name="code" required maxLength={32} pattern="[A-Za-z0-9_-]+" /></label><label>Frequency<select name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="monthly">Monthly</option><option value="annual">Annual</option></select></label><label>Due day<input name="dueDay" type="number" min={1} max={28} defaultValue="10" /></label>{frequency === "annual" && <label>Due month<input name="dueMonth" type="number" min={1} max={12} required /></label>}<label>Currency<input value={schoolCurrency || "Configure school currency first"} readOnly disabled /><small className="field-hint">Uses the school's configured base currency.</small></label></div>
       <div className="fee-line-items"><strong>Fee line items</strong>{lineItems.map((item, index) => <div className="form-grid" key={index}><label>Category<select value={item.categoryId} required onChange={(event) => updateLine(index, "categoryId", event.target.value)}><option value="">Select a category</option>{options.categories.filter((category) => !usedCategories(index).has(category._id)).map((category) => <option value={category._id} key={category._id}>{category.name}</option>)}</select></label><label>Line name<input value={item.name} required maxLength={100} onChange={(event) => updateLine(index, "name", event.target.value)} /></label><label>Amount (minor units)<input type="number" min={1} max={100000000} step={1} required value={item.amountMinor} onChange={(event) => updateLine(index, "amountMinor", event.target.value)} /></label>{lineItems.length > 1 && <button type="button" className="button button-quiet" onClick={() => setLineItems((current) => current.filter((_, row) => row !== index))}>Remove line</button>}</div>)}<button type="button" className="button button-outline button-small" disabled={lineItems.length >= 30 || lineItems.length >= options.categories.length} onClick={() => setLineItems((current) => [...current, { categoryId: "", name: "", amountMinor: "" }])}>Add line item</button>{!options.categories.length && <small className="field-hint">Create at least one active fee category first.</small>}</div>
     </>}
-    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || (!isCategory && (optionsError || !options.categories.length || !options.sessions.length || !options.classes.length))}>{busy ? "Saving…" : "Create"}</button></div>
+    <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || (!isCategory && (optionsError || !schoolCurrency || !options.categories.length || !options.sessions.length || !options.classes.length))}>{busy ? "Saving…" : "Create"}</button></div>
   </form></Modal>;
 }
 
@@ -867,10 +871,7 @@ function statusOptionsForReport(report) {
 
 function reportRow(report, item) {
   const name = [item.firstName, item.lastName].filter(Boolean).join(" ") || item.name;
-  const amount = (value, currency) => {
-    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "USD" }).format((value || 0) / 100); }
-    catch { return `${((value || 0) / 100).toFixed(2)} ${currency || ""}`.trim(); }
-  };
+  const amount = (value, currency, exponent) => formatMinor(value, currency, exponent);
   const date = (value) => {
     if (!value) return "—";
     const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
@@ -879,8 +880,8 @@ function reportRow(report, item) {
   const entity = (value) => typeof value === "object" && value !== null ? value.name || value.className || value.title || value.code || "—" : value || "—";
   if (report === "students") return { admissionNumber: item.admissionNumber, name: name || "—", status: item.status, admissionDate: date(item.admissionDate), academicSession: entity(item.academicSession), class: entity(item.class), section: entity(item.section) };
   if (report === "attendance") return { date: date(item.date), admissionNumber: item.admissionNumber, studentName: item.studentName, className: item.className, sectionName: item.sectionName, academicSession: entity(item.academicSession), status: item.status };
-  if (report === "collections") return { receiptNumber: item.receiptNumber, receivedAt: date(item.receivedAt), admissionNumber: item.admissionNumber, studentName: item.studentName, className: item.className, period: item.period, amount: amount(item.amountMinor, item.currency), method: item.method };
-  if (report === "dues") return { admissionNumber: item.admissionNumber, studentName: item.studentName, className: item.className, period: item.period, dueDate: date(item.dueDate), balance: amount(item.balanceMinor, item.currency), status: item.status };
+  if (report === "collections") return { receiptNumber: item.receiptNumber, receivedAt: date(item.receivedAt), admissionNumber: item.admissionNumber, studentName: item.studentName, className: item.className, period: item.period, amount: amount(item.amountMinor, item.currency, item.currencyExponent), method: item.method };
+  if (report === "dues") return { admissionNumber: item.admissionNumber, studentName: item.studentName, className: item.className, period: item.period, dueDate: date(item.dueDate), balance: amount(item.balanceMinor, item.currency, item.currencyExponent), status: item.status };
   if (report === "classes") return { className: item.className, academicSession: entity(item.academicSession), enrolled: item.byStatus?.enrolled ?? item.enrolled, withdrawn: item.byStatus?.withdrawn ?? 0, transferred: item.byStatus?.transferred ?? 0, graduated: item.byStatus?.graduated ?? 0 };
   return { examName: item.examName, examDate: date(item.examDate), academicSession: entity(item.academicSession), className: item.className, admissionNumber: item.admissionNumber, studentName: item.studentName, subject: item.subject, marksObtained: item.marksObtained, maxMarks: item.maxMarks, passingMarks: item.passingMarks, grade: item.grade, status: item.status };
 }
@@ -1074,19 +1075,76 @@ function subscriptionEndInfo(subscription) {
 }
 
 function SchoolProfile() {
+  const { user, school: authSchool, refreshIdentity } = useAuth();
   const [school, setSchool] = useState(null);
+  const [currencySettings, setCurrencySettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currencyBusy, setCurrencyBusy] = useState(false);
+  const [currencySearch, setCurrencySearch] = useState("");
+  const [selectedCurrency, setSelectedCurrency] = useState("");
+  const [currencyConfirmed, setCurrencyConfirmed] = useState(false);
+  const [ackExisting, setAckExisting] = useState(false);
+  const [currencyList, setCurrencyList] = useState([]);
+
+  const canConfigureCurrency = ["school_admin", "principal"].includes(user?.role);
 
   const load = async () => {
     setLoading(true);
-    try { setSchool((await get("/schools/me")).school); }
-    catch (reason) { setError(reason.message); }
+    setError("");
+    try {
+      const [schoolRes, currencyRes, currenciesRes] = await Promise.all([
+        get("/schools/me"),
+        get("/schools/me/currency").catch(() => null),
+        get("/schools/currencies").catch(() => ({ currencies: [] }))
+      ]);
+      setSchool(schoolRes.school);
+      setCurrencySettings(currencyRes);
+      setCurrencyList(Array.isArray(currenciesRes?.currencies) ? currenciesRes.currencies : []);
+      if (currencyRes?.baseCurrency) setSelectedCurrency(currencyRes.baseCurrency);
+    } catch (reason) { setError(reason.message); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
   const handleLogoChange = (logo) => setSchool((current) => current ? { ...current, logo } : current);
+
+  const filteredCurrencies = useMemo(() => {
+    const q = currencySearch.trim().toLowerCase();
+    if (!q) return currencyList;
+    return currencyList.filter((c) => [c.code, c.name, c.symbol, c.country].some((v) => String(v || "").toLowerCase().includes(q)));
+  }, [currencyList, currencySearch]);
+
+  const selectedCurrencyConfig = useMemo(() => currencyList.find((c) => c.code === selectedCurrency) || null, [currencyList, selectedCurrency]);
+
+  const saveCurrency = async () => {
+    if (!selectedCurrency) { notify.error({ message: "Select a base currency." }); return; }
+    if (!currencyConfirmed) { notify.error({ message: "Please confirm the selected base currency." }); return; }
+    if (currencySettings?.hasFinancialTransactions && !currencySettings?.baseCurrency && !ackExisting) {
+      notify.error({ message: "Please confirm that existing amounts are already represented in the selected currency." });
+      return;
+    }
+    const ok = await confirmAction({
+      title: "Confirm base currency",
+      message: currencySettings?.hasFinancialTransactions && !currencySettings?.baseCurrency
+        ? `Assign ${selectedCurrency} to this school? This will not convert or recalculate existing amounts; it confirms they are already recorded in ${selectedCurrency}.`
+        : `Set ${selectedCurrency} as this school's base currency?`,
+      confirmLabel: "Confirm currency",
+      cancelLabel: "Cancel"
+    });
+    if (!ok) return;
+    setCurrencyBusy(true);
+    try {
+      const payload = { baseCurrency: selectedCurrency, confirmation: true };
+      if (currencySettings?.hasFinancialTransactions && !currencySettings?.baseCurrency) payload.acknowledgedExistingAmounts = true;
+      await api.put("/schools/me/currency", payload);
+      notify.success("Base currency saved.");
+      await load();
+      await refreshIdentity?.();
+    } catch (reason) {
+      notify.error(reason, { title: "Could not save base currency" });
+    } finally { setCurrencyBusy(false); }
+  };
 
   if (loading) return <><PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} /><section className="content-card"><SkeletonRows rows={4} /></section></>;
   if (error) return <><PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} /><ErrorState error={{ message: error }} onRetry={load} /></>;
@@ -1094,9 +1152,11 @@ function SchoolProfile() {
   const subscription = school.subscription ?? {};
   const appOrigin = window.location.origin;
   const endInfo = subscriptionEndInfo(subscription);
+  const currency = currencySettings?.currency || authSchool?.currency || null;
+  const currencyConfigured = currencySettings?.currencyConfigurationStatus === "configured" || authSchool?.currencyConfigurationStatus === "configured";
 
   return <>
-    <PageHeader title="School profile" description="Identity and subscription status for your school." icon={Settings2} />
+    <PageHeader title="School profile" description="Identity, subscription, and financial settings for your school." icon={Settings2} />
     <div className="content-card profile-card">
       <div className="profile-identity">
         <span className="profile-logo"><SchoolLogo school={school} size={36} fallback={school.name?.slice(0, 1)} /></span>
@@ -1112,6 +1172,62 @@ function SchoolProfile() {
         <div><span>Days left</span><strong className="profile-value-literal">{endInfo.daysLeft}</strong></div>
       </div>
     </div>
+
+    <section className="content-card currency-settings-card">
+      <div className="section-head"><div><h3>Financial settings</h3><p>Base currency for school-owned fees, payroll, expenses, assets, receipts, and reports. Platform SaaS billing is separate.</p></div></div>
+      <div className="detail-grid">
+        <div className="detail-item"><span>Base currency</span><strong>{currency ? `${currency.code} — ${currency.name}` : "Not configured"}</strong></div>
+        <div className="detail-item"><span>Symbol</span><strong>{currency?.symbol || "—"}</strong></div>
+        <div className="detail-item"><span>Decimal precision</span><strong>{currency ? `${currency.fractionDigits} digit${currency.fractionDigits === 1 ? "" : "s"}` : "—"}</strong></div>
+        <div className="detail-item"><span>Status</span><strong>{currencyConfigured ? "Configured" : "Unconfigured"}</strong></div>
+        <div className="detail-item"><span>Configured at</span><strong>{currencySettings?.currencyConfiguredAt ? new Date(currencySettings.currencyConfiguredAt).toLocaleString() : "—"}</strong></div>
+        <div className="detail-item"><span>Changes allowed</span><strong>{currencySettings?.canChange ? "Yes" : "Locked"}</strong></div>
+      </div>
+
+      {currencySettings?.locked && (
+        <div className="currency-lock-note" role="status">Base currency is locked because financial transactions already exist. Historical amounts are never silently reinterpreted or converted. Contact support for a separately approved migration process if a change is required.</div>
+      )}
+
+      {!currencyConfigured && (
+        <div className="currency-config-banner">
+          <div>
+            <strong>One-time base currency confirmation required</strong>
+            <p className="field-help">Select the currency that existing school-owned financial amounts are already represented in. This assigns the currency; it does not convert or recalculate amounts. Non-financial workflows remain available.</p>
+          </div>
+          {canConfigureCurrency ? (
+            <div className="form-stack">
+              <label>Search currencies<input type="search" value={currencySearch} onChange={(e) => setCurrencySearch(e.target.value)} placeholder="Name, code, symbol, or country" /></label>
+              <label>Base currency
+                <select value={selectedCurrency} onChange={(e) => { setSelectedCurrency(e.target.value); setCurrencyConfirmed(false); }} size={Math.min(6, Math.max(4, filteredCurrencies.length || 1))}>
+                  <option value="">Select a currency…</option>
+                  {filteredCurrencies.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name} ({c.symbol})</option>)}
+                </select>
+              </label>
+              {selectedCurrencyConfig && <div className="currency-preview"><strong>{selectedCurrencyConfig.name}</strong><span>{selectedCurrencyConfig.code} · {selectedCurrencyConfig.symbol} · {selectedCurrencyConfig.fractionDigits} decimal place{selectedCurrencyConfig.fractionDigits === 1 ? "" : "s"}</span></div>}
+              {currencySettings?.hasFinancialTransactions && <label className="currency-confirm-check"><input type="checkbox" checked={ackExisting} onChange={(e) => setAckExisting(e.target.checked)} /><span>I confirm existing financial amounts are already recorded in this currency. No amounts will be converted or recalculated.</span></label>}
+              <label className="currency-confirm-check"><input type="checkbox" checked={currencyConfirmed} onChange={(e) => setCurrencyConfirmed(e.target.checked)} disabled={!selectedCurrency} /><span>I confirm this is the school's base currency for school-owned financial operations.</span></label>
+              <div><button className="button button-primary" type="button" disabled={currencyBusy} onClick={saveCurrency}>{currencyBusy ? "Saving…" : "Confirm base currency"}</button></div>
+            </div>
+          ) : (
+            <p className="field-help">An authorized school administrator must confirm the base currency in Financial Settings.</p>
+          )}
+        </div>
+      )}
+
+      {currencyConfigured && !currencySettings?.locked && canConfigureCurrency && (
+        <details className="currency-change-details">
+          <summary>Change base currency (allowed before financial transactions)</summary>
+          <div className="form-stack" style={{ marginTop: "0.75rem" }}>
+            <p className="field-help">No financial transactions exist yet. You may change the base currency before transactions are recorded. This does not convert amounts.</p>
+            <label>Search currencies<input type="search" value={currencySearch} onChange={(e) => setCurrencySearch(e.target.value)} placeholder="Name, code, symbol, or country" /></label>
+            <label>Base currency<select value={selectedCurrency} onChange={(e) => { setSelectedCurrency(e.target.value); setCurrencyConfirmed(false); }}><option value="">Select a currency…</option>{filteredCurrencies.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name} ({c.symbol})</option>)}</select></label>
+            <label className="currency-confirm-check"><input type="checkbox" checked={currencyConfirmed} onChange={(e) => setCurrencyConfirmed(e.target.checked)} disabled={!selectedCurrency} /><span>I confirm this change before financial transactions exist.</span></label>
+            <div><button className="button button-primary" type="button" disabled={currencyBusy} onClick={saveCurrency}>{currencyBusy ? "Saving…" : "Save base currency"}</button></div>
+          </div>
+        </details>
+      )}
+    </section>
+
     <SchoolLogoManager school={school} onUpdated={handleLogoChange} />
   </>;
 }
@@ -1137,11 +1253,11 @@ function ParentRecords({ tab, detail }) {
   const columns = tab === "attendance"
     ? [["date", "Date", (row) => row.date ? new Date(row.date).toLocaleDateString() : "—"], ["status", "Status"], ["checkIn", "Check-in", (row) => row.checkIn ? new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"], ["checkOut", "Check-out", (row) => row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"], ["note", "Note"]]
     : tab === "fees"
-      ? [["period", "Period"], ["dueDate", "Due date", (row) => row.dueDate ? new Date(row.dueDate).toLocaleDateString() : "—"], ["amountDueMinor", "Amount due", (row) => formatMinor(row.amountDueMinor, row.currency)], ["paidAmountMinor", "Paid", (row) => formatMinor(row.paidAmountMinor, row.currency)], ["balanceMinor", "Balance", (row) => formatMinor(row.balanceMinor, row.currency)], ["status", "Status"]]
+      ? [["period", "Period"], ["dueDate", "Due date", (row) => row.dueDate ? new Date(row.dueDate).toLocaleDateString() : "—"], ["amountDueMinor", "Amount due", (row) => formatMinor(row.amountDueMinor, row.currency, row.currencyExponent)], ["paidAmountMinor", "Paid", (row) => formatMinor(row.paidAmountMinor, row.currency, row.currencyExponent)], ["balanceMinor", "Balance", (row) => formatMinor(row.balanceMinor, row.currency, row.currencyExponent)], ["status", "Status"]]
       : [["examId", "Assessment reference"], ["classSubjectId", "Subject reference"], ["marksObtained", "Marks"], ["enteredAt", "Entered", (row) => row.enteredAt ? new Date(row.enteredAt).toLocaleDateString() : "—"]];
   const rows = tab === "attendance" ? detail || [] : tab === "fees" ? detail?.vouchers || [] : detail || [];
   if (!rows.length) return <EmptyState title={`No ${tab} records`} detail="There are no records available for the selected student." />;
-  return <>{tab === "fees" && <><h2 className="parent-record-heading">Fee vouchers</h2><RecordsTable columns={columns} rows={rows} />{detail?.payments?.length > 0 && <><h2 className="parent-record-heading">Recent payments</h2><RecordsTable columns={[["receiptNumber", "Receipt"], ["amountMinor", "Amount", (row) => formatMinor(row.amountMinor, row.currency)], ["method", "Method"], ["receivedAt", "Received", (row) => row.receivedAt ? new Date(row.receivedAt).toLocaleDateString() : "—"]]} rows={detail.payments} /></>}</>}{tab !== "fees" && <RecordsTable columns={columns} rows={rows} />}</>;
+  return <>{tab === "fees" && <><h2 className="parent-record-heading">Fee vouchers</h2><RecordsTable columns={columns} rows={rows} />{detail?.payments?.length > 0 && <><h2 className="parent-record-heading">Recent payments</h2><RecordsTable columns={[["receiptNumber", "Receipt"], ["amountMinor", "Amount", (row) => formatMinor(row.amountMinor, row.currency, row.currencyExponent)], ["method", "Method"], ["receivedAt", "Received", (row) => row.receivedAt ? new Date(row.receivedAt).toLocaleDateString() : "—"]]} rows={detail.payments} /></>}</>}{tab !== "fees" && <RecordsTable columns={columns} rows={rows} />}</>;
 }
 
 function RecordsTable({ columns, rows }) {
@@ -1209,5 +1325,16 @@ function RowActionModal({ page, action, busy, onClose, onSubmit }) {
   return <CreateModal title={title} fields={fields} busy={busy} onClose={onClose} onSubmit={submit} />;
 }
 
-function formatMinor(value, currency = "USD") { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "USD" }).format((value || 0) / 100); }
+function formatMinor(value, currency = "USD", exponent) {
+  const code = String(currency || "USD").toUpperCase();
+  const config = getCurrencyConfig(code);
+  const digits = Number.isInteger(exponent) ? exponent : (config?.fractionDigits ?? 2);
+  const factor = 10 ** digits;
+  const amount = (Number(value) || 0) / factor;
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: config ? code : "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount);
+  } catch {
+    return `${amount.toFixed(digits)} ${code}`.trim();
+  }
+}
 function CheckIcon() { return <CircleDollarSign size={16} />; }

@@ -9,7 +9,7 @@ This guide describes how to deploy SchoolFlow to Vercel as a **single project** 
 | Piece | Location | How it runs |
 |---|---|---|
 | Frontend (React + Vite) | `frontend/` | Built by `npm run build` (root script) to `frontend/dist`, served as static files. |
-| API (Express) | `backend/src/` | Exposed through the serverless function `api/[...path].mjs`, which imports `backend/src/serverless-handler.js`. |
+| API (Express) | `backend/src/` | Exposed through the serverless function `api/index.mjs`, which imports `backend/src/serverless-handler.js`. |
 | SPA routing | `vercel.json` | `rewrites` sends unmatched paths to `/index.html` so client-side routes (e.g. `/students`) load. Static assets and the `/api` function take precedence over the rewrite. |
 | Security headers | `vercel.json` | A Content-Security-Policy and related headers are applied to all responses. |
 
@@ -84,6 +84,7 @@ After deploying, verify:
 - [ ] Creating a record persists after a refresh (Atlas connection and transactions work).
 - [ ] Rate limiting returns `429` under repeated attempts and does not return `503` (Redis is reachable).
 - [ ] If email is configured, a password-reset request sends mail; otherwise it returns an explicit `503`.
+- [ ] Upload a 5 MiB document and a 25 MiB student video. Verify whether the platform returns `413 FUNCTION_PAYLOAD_TOO_LARGE` before the application sees the request; see the body-size limitation below.
 
 ## 9. Troubleshooting
 
@@ -99,6 +100,11 @@ After deploying, verify:
 ## 10. Known limitations
 
 - No live Vercel deployment has been verified from this repository.
+- Vercel's default function request-body limit (4.5 MB) is smaller than the application's document and student-media JSON limits (8 MB and 38 MB). Large uploads may be rejected by the platform before Express can return its safe 413 response. The optional larger-body configuration still does not cover a 25 MiB video encoded as base64; use a chunked/direct-to-storage upload flow or lower the accepted media sizes before relying on those uploads in production.
 - Cross-site (different registrable domain) frontend/API deployment is not supported by the current cookie settings; keep them same-site.
 - Online payment **checkout** is a provider interface without an adapter; manual payment recording and revenue reporting are implemented and work without a gateway.
 - An external monitoring/alerting integration should be added before production traffic.
+
+## 11. Direct student-media uploads (CSP and storage origins)
+
+The shipped CSP in `vercel.json` allows Cloudinary upload endpoints in `connect-src` (`https://api.cloudinary.com https://*.cloudinary.com`). If the configured storage provider returns S3, R2, B2, or Spaces upload URLs instead, add each **exact** origin (`https://<host>`, no `https:` wildcard) to that `connect-src` list before deploying. Also set the build-time variable `STORAGE_UPLOAD_ORIGINS` to the same comma-separated list so the frontend receives `VITE_STORAGE_UPLOAD_ORIGINS` (see `frontend/src/config/storage-upload-origins.js`); an explicit `VITE_STORAGE_UPLOAD_ORIGINS` value takes precedence. Rebuild after changing either. Authorize/finalize calls still go to `/api/v1` with the app session cookie and CSRF header; the provider request itself is sent with `credentials: "omit"` and no app credentials, so never add cookies or CSRF headers to it.

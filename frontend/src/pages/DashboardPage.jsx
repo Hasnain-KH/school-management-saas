@@ -9,11 +9,17 @@ import { get, queryString } from "../api/client.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { EmptyState, ErrorState, LoadingState, SkeletonCards, SkeletonRows } from "../components/feedback.jsx";
 import usePrefersReducedMotion from "../utils/usePrefersReducedMotion.js";
+import { getCurrencyConfig } from "../utils/currency.js";
 
 const number = (value) => new Intl.NumberFormat().format(value || 0);
-const money = (minor, currency = "USD") => {
-  try { return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format((minor || 0) / 100); }
-  catch { return `${((minor || 0) / 100).toFixed(0)} ${currency}`; }
+const money = (minor, currency = "USD", exponent) => {
+  const code = String(currency || "USD").toUpperCase();
+  const cfg = getCurrencyConfig(code);
+  const digits = Number.isInteger(exponent) ? exponent : (cfg?.fractionDigits ?? 2);
+  const factor = 10 ** digits;
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: cfg ? code : "USD", maximumFractionDigits: digits }).format((Number(minor) || 0) / factor);
+  } catch { return `${((Number(minor) || 0) / factor).toFixed(digits)} ${code}`; }
 };
 const total = (list = []) => list.reduce((sum, item) => sum + (item.count || 0), 0);
 const monthKey = () => new Date().toISOString().slice(0, 7);
@@ -186,7 +192,7 @@ function SchoolDashboard({ user, school, data, navigate }) {
   const staff = total(data?.staffByRoleAndStatus);
   const collections = data?.collectionsThisMonth || [];
   const overdue = data?.overdueBalances || [];
-  const currency = collections[0]?.currency || overdue[0]?.currency || "USD";
+  const currency = data?.currency?.code || collections[0]?.currency || overdue[0]?.currency || school?.baseCurrency || "USD";
   const collected = collections.filter((item) => item.currency === currency).reduce((sum, item) => sum + item.amountMinor, 0);
   const due = overdue.filter((item) => item.currency === currency).reduce((sum, item) => sum + item.balanceMinor, 0);
   const overdueVouchers = overdue.reduce((sum, item) => sum + item.vouchers, 0);

@@ -186,7 +186,7 @@ const main = async () => {
     const schoolSlug = `qa-school-${stamp.toLowerCase()}`;
     await step("school.register", async () => {
         const data = await new Client().bootstrap().then((client) =>
-            client.post("/auth/register", {
+            client.post("/auth/register", { baseCurrency: "USD", currencyConfirmed: true,
                 schoolName: `QA School ${stamp}`,
                 schoolSlug,
                 email: adminEmail,

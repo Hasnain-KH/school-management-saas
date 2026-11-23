@@ -10,6 +10,7 @@ import Student from "../models/student.model.js";
 import StudentFeeAssignment from "../models/student-fee-assignment.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
+import { getCurrencyFractionDigits } from "../utils/currency.js";
 
 const assertTenant = (req) => {
     if (!req.user?.schoolId || !req.school
@@ -92,6 +93,10 @@ export const listFeeCategories = async (req, input) => {
 
 export const createFeeStructure = async (req, input) => {
     const schoolId = assertTenant(req);
+    const currency = req.schoolCurrency?.code || req.school?.baseCurrency;
+    if (!currency || req.school?.currencyConfigurationStatus !== "configured") {
+        throw new HttpError(409, "School base currency is not configured. An authorized school administrator must confirm the base currency in Financial Settings before financial operations can proceed.");
+    }
     return withTransaction(async (session) => {
         const academicSession = await AcademicSession.findOne({ _id: input.academicSessionId, schoolId }).session(session);
         const academicClass = await AcademicClass.findOne({ _id: input.classId, schoolId, isActive: true }).session(session);
@@ -109,6 +114,8 @@ export const createFeeStructure = async (req, input) => {
 
         const structure = new FeeStructure({
             ...input,
+            currency,
+            currencyExponent: req.schoolCurrency?.fractionDigits ?? getCurrencyFractionDigits(currency),
             schoolId,
             code: input.code.toUpperCase(),
             lineItems: input.lineItems.map((item) => ({
@@ -161,6 +168,7 @@ export const createStudentFeeAssignment = async (req, input) => {
         const assignment = new StudentFeeAssignment({
             ...input,
             schoolId,
+            currencyExponent: structure.currencyExponent ?? getCurrencyFractionDigits(structure.currency),
             discountAmountMinor: input.discountAmountMinor ?? 0,
             discountBasisPoints: input.discountBasisPoints ?? 0,
             assignedBy: req.user._id
@@ -254,6 +262,7 @@ export const generateFeeVouchers = async (req, input) => {
                     period: input.period,
                     dueDate: dueDateFor(input.period, structure),
                     currency: structure.currency,
+                    currencyExponent: structure.currencyExponent ?? getCurrencyFractionDigits(structure.currency),
                     lineItems: structure.lineItems,
                     grossAmountMinor: gross,
                     discountAmountMinor,
@@ -359,6 +368,7 @@ export const collectFeePayment = async (req, voucherId, input) => {
             idempotencyKey: input.idempotencyKey,
             amountMinor: input.amountMinor,
             currency: voucher.currency,
+            currencyExponent: voucher.currencyExponent ?? getCurrencyFractionDigits(voucher.currency),
             method: input.method,
             reference: input.reference,
             note: input.note,

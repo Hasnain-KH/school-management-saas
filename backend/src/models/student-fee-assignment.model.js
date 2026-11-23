@@ -7,6 +7,8 @@ const studentFeeAssignmentSchema = new mongoose.Schema(
         feeStructureId: { type: mongoose.Schema.Types.ObjectId, ref: "FeeStructure", required: true },
         discountAmountMinor: { type: Number, min: 0, max: 100000000, default: 0, required: true },
         discountBasisPoints: { type: Number, min: 0, max: 10000, default: 0, required: true },
+        // Exponent for discountAmountMinor interpretation; null means inherit structure currency exponent.
+        currencyExponent: { type: Number, min: 0, max: 3, default: null },
         scholarshipName: { type: String, trim: true, maxlength: 120 },
         startPeriod: { type: String, required: true, match: /^\d{4}(?:-(0[1-9]|1[0-2]))?$/ },
         endPeriod: { type: String, match: /^\d{4}(?:-(0[1-9]|1[0-2]))?$/ },

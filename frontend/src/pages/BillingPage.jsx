@@ -3,6 +3,7 @@ import { Receipt } from "../components/ui/icon/icons.jsx";
 import { get, queryString } from "../api/client.js";
 import ModuleHeader from "../components/ModuleHeader.jsx";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback.jsx";
+import { formatMoney as formatCurrencyMoney } from "../utils/currency.js";
 
 const PAGE_SIZE = 25;
 
@@ -10,12 +11,7 @@ const label = (value) => String(value ?? "—").replaceAll("_", " ").replace(/^.
 
 const formatMoney = (minor, currency) => {
   if (minor === null || minor === undefined) return "—";
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "USD" })
-      .format(Number(minor) / 100);
-  } catch {
-    return `${currency || ""} ${(Number(minor) / 100).toFixed(2)}`.trim();
-  }
+  return formatCurrencyMoney(minor, currency || "USD");
 };
 
 const formatDate = (value) => {

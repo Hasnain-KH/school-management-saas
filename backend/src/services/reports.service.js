@@ -10,6 +10,7 @@ import Student from "../models/student.model.js";
 import StudentAttendance from "../models/student-attendance.model.js";
 import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
+import { getCurrencyConfig } from "../utils/currency.js";
 
 const assertTenant = (req) => {
     if (!req.user?.schoolId || !req.school
@@ -69,8 +70,11 @@ export const getDashboardSummary = async (req) => {
         Exam.countDocuments({ schoolId, status: "scheduled" })
     ]);
 
+    const schoolCurrency = getCurrencyConfig(req.school?.baseCurrency);
     return {
         asOf: now,
+        currency: schoolCurrency ? { code: schoolCurrency.code, symbol: schoolCurrency.symbol, fractionDigits: schoolCurrency.fractionDigits } : null,
+        currencyConfigured: req.school?.currencyConfigurationStatus === "configured" && Boolean(schoolCurrency),
         studentsByStatus: studentCounts.map(({ _id, count }) => ({ status: _id, count })),
         staffByRoleAndStatus: staffCounts.map(({ _id, count }) => ({
             role: _id.role,
@@ -193,9 +197,17 @@ export const getFinancialStatistics = async (req, input) => {
     const schoolId = assertTenant(req);
     const from = utcDayStart(input.from);
     const to = dayAfter(input.to);
+    const schoolCurrency = getCurrencyConfig(req.school?.baseCurrency);
+    const currencyCode = schoolCurrency?.code;
+    const paymentMatch = { schoolId, receivedAt: { $gte: from, $lt: to } };
+    const voucherMatch = { schoolId, balanceMinor: { $gt: 0 } };
+    if (currencyCode) {
+        paymentMatch.currency = currencyCode;
+        voucherMatch.currency = currencyCode;
+    }
     const [collections, outstanding] = await Promise.all([
         FeePayment.aggregate([
-            { $match: { schoolId, receivedAt: { $gte: from, $lt: to } } },
+            { $match: paymentMatch },
             {
                 $group: {
                     _id: { currency: "$currency", method: "$method" },
@@ -206,7 +218,7 @@ export const getFinancialStatistics = async (req, input) => {
             { $sort: { "_id.currency": 1, "_id.method": 1 } }
         ]),
         FeeVoucher.aggregate([
-            { $match: { schoolId, balanceMinor: { $gt: 0 } } },
+            { $match: voucherMatch },
             {
                 $group: {
                     _id: { currency: "$currency", status: "$status" },
@@ -220,6 +232,7 @@ export const getFinancialStatistics = async (req, input) => {
     return {
         from: input.from,
         to: input.to,
+        currency: schoolCurrency ? { code: schoolCurrency.code, symbol: schoolCurrency.symbol, fractionDigits: schoolCurrency.fractionDigits } : null,
         collections: collections.map((row) => ({
             currency: row._id.currency,
             method: row._id.method,

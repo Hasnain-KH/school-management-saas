@@ -1499,3 +1499,35 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
   .modal-backdrop, .toast-viewport, .motion-shimmer, .network-banner { display: none !important; }
 }
 
+
+
+/* Student Media / shared utilities */
+.table-subtext { display: block; color: var(--text-muted); font-size: var(--fs-xs); margin-top: 2px; }
+.stack-gap { display: flex; flex-direction: column; gap: var(--space-3); }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+.toolbar-filters { display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap; }
+.form-hint, .field-hint { color: var(--text-muted); font-size: var(--fs-xs); }
+.upload-status { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); font-size: var(--fs-sm); }
+.upload-status-bar { width: 96px; height: 6px; border-radius: 999px; overflow: hidden; position: relative; }
+.upload-status-bar::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--primary), transparent); animation: sf-shimmer 1.2s linear infinite; }
+.status-pill.status-success { background: color-mix(in srgb, var(--success) 14%, var(--surface-2)); color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--line)); }
+.status-pill.status-warn { background: color-mix(in srgb, var(--warning, #d97706) 14%, var(--surface-2)); color: var(--warning, #d97706); border-color: color-mix(in srgb, var(--warning, #d97706) 30%, var(--line)); }
+.status-pill.status-danger { background: color-mix(in srgb, var(--danger) 14%, var(--surface-2)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+.status-pill.status-neutral { background: var(--surface-2); color: var(--text-muted); }
+@media (max-width: 760px) { .table-card .status-pill, .modal .status-pill, .detail-grid .status-pill { display: inline-flex; } }
+
+/* Currency setup / financial settings */
+.currency-setup-block { display: grid; gap: 0.5rem; }
+.currency-setup-block select { width: 100%; min-height: 8rem; }
+.currency-preview { display: grid; gap: 0.125rem; padding: 0.75rem 0.875rem; border: 1px solid var(--border, #d9dee5); border-radius: 0.75rem; background: var(--surface-alt, rgba(0,0,0,0.02)); font-size: 0.875rem; }
+.currency-preview span { color: var(--text-muted, #5f6b7a); }
+.currency-confirm-check { display: flex; gap: 0.625rem; align-items: flex-start; font-size: 0.875rem; line-height: 1.4; }
+.currency-confirm-check input { margin-top: 0.2rem; }
+.field-help { font-size: 0.8125rem; color: var(--text-muted, #5f6b7a); margin: 0; }
+.required { color: var(--danger, #c0392b); }
+.currency-settings-card .detail-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.currency-settings-card .detail-item { display: grid; gap: 0.2rem; padding: 0.75rem; border: 1px solid var(--border, #d9dee5); border-radius: 0.75rem; }
+.currency-settings-card .detail-item span { font-size: 0.75rem; color: var(--text-muted, #5f6b7a); text-transform: uppercase; letter-spacing: 0.03em; }
+.currency-settings-card .detail-item strong { font-size: 0.95rem; }
+.currency-lock-note { padding: 0.75rem 0.875rem; border-radius: 0.75rem; background: var(--warning-bg, #fff8e6); color: var(--warning-text, #7a5a00); font-size: 0.875rem; }
+.currency-config-banner { padding: 1rem; border: 1px solid var(--warning-border, #f0d58c); border-radius: 1rem; background: var(--warning-bg, #fffaf0); display: grid; gap: 0.75rem; }

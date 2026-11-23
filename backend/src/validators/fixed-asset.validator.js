@@ -8,7 +8,8 @@ export const fixedAssetCreateSchema = z.object({
     acquisitionDate: z.coerce.date(),
     costMinor: z.number().int().min(1).max(100000000000),
     salvageValueMinor: z.number().int().min(0).max(99999999999),
-    currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
+    // Ignored by server; tenant base currency is authoritative.
+    currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional(),
     usefulLifeMonths: z.number().int().min(1).max(1200),
     depreciationMethod: z.literal("straight_line").default("straight_line"),
     location: z.string().trim().max(120).optional()

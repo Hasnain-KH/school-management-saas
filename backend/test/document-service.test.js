@@ -57,7 +57,7 @@ const makeInput = (overrides = {}) => ({
     category: "other",
     fileName: "report.pdf",
     contentType: "application/pdf",
-    dataBase64: Buffer.from("dummy-pdf-bytes").toString("base64"),
+    dataBase64: Buffer.from("%PDF-1.4 synthetic test document").toString("base64"),
     ...overrides
 });
 

@@ -9,6 +9,8 @@ const feePaymentSchema = new mongoose.Schema(
         idempotencyKey: { type: String, required: true, trim: true, immutable: true, maxlength: 100 },
         amountMinor: { type: Number, required: true, min: 1, immutable: true },
         currency: { type: String, required: true, match: /^[A-Z]{3}$/, immutable: true },
+        // Explicit minor-unit exponent used when amountMinor was stored. Default 2 preserves legacy hundredths records.
+        currencyExponent: { type: Number, min: 0, max: 3, default: 2, required: true, immutable: true },
         method: { type: String, enum: ["cash", "bank_transfer", "cheque", "other"], required: true, immutable: true },
         reference: { type: String, trim: true, maxlength: 100, immutable: true },
         note: { type: String, trim: true, maxlength: 300, immutable: true },

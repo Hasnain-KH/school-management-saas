@@ -8,20 +8,23 @@ const permissionsByRole = {
         "attendance:read", "attendance:manage", "finance:read", "finance:manage",
         "exams:read", "exams:manage", "exams:marks", "operations:read",
         "operations:manage", "notifications:read", "notifications:manage", "reports:read",
-        "documents:read", "documents:manage"
+        "documents:read", "documents:manage",
+        "studentMedia:read", "studentMedia:upload", "studentMedia:review", "studentMedia:manage"
     ]),
     principal: new Set([
         "school:read", "academic:read", "academic:manage",
         "students:read", "students:manage", "attendance:read", "attendance:manage",
         "finance:read", "reports:read", "exams:read", "exams:manage", "exams:marks",
         "operations:read", "operations:manage", "notifications:read", "notifications:manage",
-        "documents:read", "documents:manage"
+        "documents:read", "documents:manage",
+        "studentMedia:read", "studentMedia:upload", "studentMedia:review", "studentMedia:manage"
     ]),
     teacher: new Set([
         "school:read", "academic:read", "attendance:read", "attendance:manage", "exams:marks",
-        "exams:read", "notifications:read", "documents:read"
+        "exams:read", "notifications:read", "documents:read",
+        "studentMedia:read", "studentMedia:upload"
     ]),
-    parent: new Set(["school:read", "student:read", "notifications:read", "documents:read"])
+    parent: new Set(["school:read", "student:read", "notifications:read", "documents:read", "studentMedia:read"])
 };
 
 export const hasPermission = (role, permission) =>

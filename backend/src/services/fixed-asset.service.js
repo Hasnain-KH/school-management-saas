@@ -6,6 +6,7 @@ import Student from "../models/student.model.js";
 import User from "../models/user.model.js";
 import { HttpError } from "../utils/http-error.js";
 import { withTransaction } from "../utils/transaction.js";
+import { getCurrencyFractionDigits } from "../utils/currency.js";
 
 const assertTenant = (req) => {
     if (!req.user?.schoolId || !req.school
@@ -30,9 +31,15 @@ const audit = async (req, session, action, resourceId, metadata = {}) => {
 
 export const createFixedAsset = async (req, input) => {
     const schoolId = assertTenant(req);
+    const currency = req.schoolCurrency?.code || req.school?.baseCurrency;
+    if (!currency || req.school?.currencyConfigurationStatus !== "configured") {
+        throw new HttpError(409, "School base currency is not configured. An authorized school administrator must confirm the base currency in Financial Settings before financial operations can proceed.");
+    }
     return withTransaction(async (session) => {
         const asset = new FixedAsset({
             ...input,
+            currency,
+            currencyExponent: req.schoolCurrency?.fractionDigits ?? getCurrencyFractionDigits(currency),
             schoolId,
             assetTag: input.assetTag.toUpperCase(),
             createdBy: req.user._id
@@ -185,6 +192,7 @@ export const recordAssetDepreciation = async (req, assetId, input) => {
             period: input.period,
             amountMinor,
             accumulatedMinor,
+            currencyExponent: asset.currencyExponent ?? getCurrencyFractionDigits(asset.currency),
             actorUserId: req.user._id
         });
         try {

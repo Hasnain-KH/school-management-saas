@@ -2,6 +2,7 @@ import express from "express";
 import * as controller from "../controllers/finance.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { requirePermission, requirePlanFeature, requireTenant } from "../middleware/authorization.middleware.js";
+import { requireConfiguredSchoolCurrency } from "../middleware/school-currency.middleware.js";
 import { paginationSchema, validate } from "../validators/common.validator.js";
 import {
     collectionReportQuerySchema,
@@ -21,7 +22,7 @@ import {
 } from "../validators/finance.validator.js";
 
 const router = express.Router();
-router.use(requireAuth, requireTenant, requirePlanFeature("fees"));
+router.use(requireAuth, requireTenant, requirePlanFeature("fees"), requireConfiguredSchoolCurrency({ mutationsOnly: true }));
 
 router.get("/categories", requirePermission("finance:read"), validate(feeCategoryQuerySchema, "query"), controller.listCategories);
 router.post("/categories", requirePermission("finance:manage"), validate(feeCategoryCreateSchema), controller.createCategory);

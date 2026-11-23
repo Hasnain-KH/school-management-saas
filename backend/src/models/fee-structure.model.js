@@ -20,6 +20,8 @@ const feeStructureSchema = new mongoose.Schema(
         dueDay: { type: Number, min: 1, max: 28, default: 10, required: true },
         dueMonth: { type: Number, min: 1, max: 12 },
         currency: { type: String, uppercase: true, match: /^[A-Z]{3}$/, required: true },
+        // Explicit minor-unit exponent used when amounts were stored. Default 2 preserves legacy hundredths records.
+        currencyExponent: { type: Number, min: 0, max: 3, default: 2, required: true },
         lineItems: { type: [feeLineItemSchema], validate: [(items) => items.length > 0, "At least one fee item is required"] },
         isActive: { type: Boolean, default: true, required: true }
     },

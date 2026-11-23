@@ -24,6 +24,29 @@ export const getAllowedOrigins = () =>
             ? []
             : ["http://localhost:3000", "http://localhost:5173"];
 
+// Non-secret browser origins used only by CSP connect-src for direct uploads.
+// Invalid values are ignored so configuration drift cannot weaken the policy.
+export const getStorageUploadOrigins = () => {
+    const configured = process.env.STORAGE_UPLOAD_ORIGINS;
+    if (!configured) return [];
+    const origins = [];
+    for (const entry of configured.split(",")) {
+        const value = entry.trim();
+        if (!value) continue;
+        try {
+            const parsed = new URL(value);
+            if (!["http:", "https:"].includes(parsed.protocol)
+                || parsed.username || parsed.password
+                || parsed.pathname !== "/" || parsed.search || parsed.hash
+                || !parsed.hostname) continue;
+            if (!origins.includes(parsed.origin)) origins.push(parsed.origin);
+        } catch {
+            // Ignore malformed entries; the application never fails open here.
+        }
+    }
+    return origins;
+};
+
 // Explicit, opt-in policy flag. Email delivery and mandatory email verification
 // are independent concerns: configuring a provider (EMAIL_API_KEY/EMAIL_FROM)
 // must never lock existing accounts out. Only when this is the literal "true" do

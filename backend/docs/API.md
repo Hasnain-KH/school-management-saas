@@ -13,7 +13,7 @@ Base path: `/api/v1`. Send JSON with `Content-Type: application/json`. Authentic
 | Method | Path | Access | Body |
 |---|---|---|---|
 | GET | `/auth/csrf` | Public | —; returns a CSRF token and sets the CSRF cookie |
-| POST | `/auth/register` | Public; rate limited | `schoolName`, optional `schoolSlug`, `email`, optional `phone`, `adminName`, `password` |
+| POST | `/auth/register` | Public; rate limited | `schoolName`, optional `schoolSlug`, `email`, optional `phone`, `adminName`, `password`, `baseCurrency` (ISO 4217), `currencyConfirmed` (true) |
 | POST | `/auth/login` | Public; rate limited | `schoolSlug`, `email`, `password` for school accounts; omit `schoolSlug` for a provisioned platform super admin |
 | POST | `/auth/refresh` | Refresh cookie; rate limited | — |
 | POST | `/auth/logout` | Refresh cookie | —; remains usable after access-cookie expiration |
@@ -263,6 +263,20 @@ Parent access is denied unless the student-guardian relationship exists in the a
 Email delivery (password reset, email verification, overdue reminders, welcome/notification mail) is implemented behind a Resend-compatible HTTP adapter and is enabled by setting `EMAIL_API_KEY` and `EMAIL_FROM`; until then delivery endpoints return `503`. Document upload/download is implemented behind a selectable storage adapter. `STORAGE_PROVIDER` defaults to `s3` (enabled by `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, and credentials) and can be set to `cloudinary` (enabled by `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`); until the selected provider is configured, document routes return `503`. `payment-gateway.provider.js` remains an adapter contract only — online checkout and webhook processing are not enabled. The frontend exports returned report data to CSV and Excel. PDF is a printable browser report; the user saves it using the browser's print-to-PDF option. No third-party delivery, payment, or storage is simulated. See [external services](../../docs/EXTERNAL-SERVICES.md).
 
 The React frontend lives in `frontend/`, defaults to `http://localhost:5000/api/v1`, and uses `VITE_API_URL` for another API origin. The interface provides role-specific navigation; server-side permissions remain authoritative.
+
+## Student Media direct upload (teacher)
+
+All routes below are under `/api/v1/student-media`, require an authenticated school member, a server-derived tenant, and the `studentMedia:upload` permission (the capabilities read requires `studentMedia:read`). The four `POST` routes use the shared upload limiter; `GET /teacher/capabilities` is a read and is not upload-limited. Direct-upload routes return `503` when the provider does not support verified direct upload. Clients consult the capabilities response first and use the legacy base64 `POST /teacher/upload` path only when direct upload is reported unsupported; a failure after an authorize call is surfaced to the user and never silently retried as base64.
+
+| Method | Path | Request | Response shape (success) |
+|---|---|---|---|
+| GET | `/teacher/capabilities` | No body. | `200`: `{ directUploadSupported, provider: { configured, providerName, directUpload, objectLookup, objectRead, maxUploadBytes, uploadAuthTtlSeconds (<= 300) }, effectiveLimits: { photo, video, certificate, project, document }, limits: { videoMaxSeconds, teacherDailyUploadLimit, maxAffectedStudents } }`. The nested `provider` capabilities tell the client whether verified direct upload is available; no provider secret is returned. |
+| POST | `/teacher/upload-authorize` | Strict JSON: `studentId`, optional `studentIds` (max 25), `title`, `description`, `teacherNote`, `mediaType`, `category`, optional `eventDate`, `fileName`, `contentType`, `byteSize`, `checksumSha256` (hex), `durationSeconds` (required and `> 0` for videos, at most 60). | `201`: `{ uploadId (UUID), key, authorization: { kind, method, url, headers? / fields?, expiresInSeconds (<= 300), expiresAt } }`. The browser sends bytes to `url` using `method` with the returned headers or form fields. |
+| POST | `/teacher/upload-finalize` | `{ uploadId (UUID), durationSeconds? }`. | `200`: media summary including `mediaId`, `reviewStatus: "pending_review"`, `publicationStatus: "draft"`, `consentStatus`, `uploadMode: "direct"`, `durationVerified`, and `durationSource`. |
+| POST | `/teacher/:id/resubmit-authorize` | Same metadata as upload-authorize, without student selection; students come from the existing media record. | `201`: same `{ uploadId, key, authorization }` shape. |
+| POST | `/teacher/:id/resubmit-finalize` | `{ uploadId (UUID), durationSeconds? }`. | `200`: updated media summary for that same-tenant record. |
+
+The backend generates the object key and caps authorization TTL at 300 seconds. At finalization it looks up the object and reads bytes from the provider, verifies the SHA-256 checksum and magic-byte type, and uses provider-reported duration when available. Browser-supplied duration is advisory: video publication stays blocked until trusted metadata verifies it. Authorization expiry requires a new authorize call; consent checks and admin review are unchanged. See [external services](../../docs/EXTERNAL-SERVICES.md).
 
 ## Limits and status codes
 

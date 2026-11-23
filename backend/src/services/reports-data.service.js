@@ -272,6 +272,7 @@ export const getFeeDueRecords = async (req, input) => {
                 dueDate: 1,
                 balanceMinor: 1,
                 currency: 1,
+                currencyExponent: 1,
                 status: 1
             } }
         ]),

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     configureDocumentStorageFromEnv,
+    configureDocumentStorageProvider,
     getDocumentStorageProvider,
     getDocumentStorageProviderName,
-    isDocumentStorageConfigured
+    isDocumentStorageConfigured,
+    registerDocumentStorageProvider
 } from "../src/services/document-storage.provider.js";
 
 // Dummy values only; these tests never contact a real provider.
@@ -94,5 +96,43 @@ test("records can resolve their original provider independently of the default",
         assert.ok(s3);
         assert.ok(cloudinary);
         assert.notEqual(s3, cloudinary);
+    });
+});
+
+test("both minimal and capability-enabled providers satisfy the storage contract", () => {
+    const mandatoryOnly = {
+        upload: async () => ({ key: "synthetic-key" }),
+        delete: async () => ({ deleted: true }),
+        createDownloadUrl: async () => "https://example.test/signed"
+    };
+    assert.doesNotThrow(() => configureDocumentStorageProvider(mandatoryOnly, "mandatory-only"));
+    assert.equal(getDocumentStorageProvider("mandatory-only"), mandatoryOnly);
+    assert.equal(getDocumentStorageProvider(), mandatoryOnly);
+    assert.equal(typeof mandatoryOnly.createUploadAuthorization, "undefined");
+
+    const capabilities = { directUpload: "synthetic", objectLookup: true, objectRead: true };
+    const capable = {
+        ...mandatoryOnly,
+        createUploadAuthorization: () => ({ kind: "synthetic", method: "POST" }),
+        getObjectMetadata: async () => null,
+        readObjectBytes: async () => null,
+        getCapabilities: () => capabilities
+    };
+    assert.doesNotThrow(() => registerDocumentStorageProvider("capable", capable));
+    assert.equal(getDocumentStorageProvider("capable"), capable);
+    assert.deepEqual(capable.getCapabilities(), capabilities);
+});
+
+test("capability discovery works on configured adapters without invoking them", () => {
+    withEnv({ ...S3_ENV, ...CLOUDINARY_ENV, STORAGE_PROVIDER: "cloudinary" }, () => {
+        const storage = configureDocumentStorageFromEnv();
+        assert.deepEqual(storage.getCapabilities(), {
+            directUpload: "cloudinarySignedPost",
+            objectLookup: true,
+            objectRead: true,
+            maxUploadBytes: 10 * 1024 * 1024,
+            uploadAuthTtlSeconds: 300
+        });
+        assert.equal(typeof getDocumentStorageProvider("s3").getCapabilities, "function");
     });
 });

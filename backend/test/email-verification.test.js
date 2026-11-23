@@ -199,7 +199,9 @@ test("registration with mandatory verification withholds sessions, marks the acc
             schoolName: "Example School",
             email: "admin@example.test",
             adminName: "School Admin",
-            password: "A-longer-password-123"
+            password: "A-longer-password-123",
+            baseCurrency: "USD",
+            currencyConfirmed: true
         });
 
         assert.equal(result.emailVerificationRequired, true);
@@ -234,7 +236,9 @@ test("registration without mandatory verification still issues an authenticated 
         schoolName: "Example School",
         email: "admin@example.test",
         adminName: "School Admin",
-        password: "A-longer-password-123"
+        password: "A-longer-password-123",
+        baseCurrency: "USD",
+        currencyConfirmed: true
     });
 
     assert.equal("accessToken" in result, true);

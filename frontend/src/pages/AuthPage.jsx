@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, BookOpenCheck, Check, Mail, School } from "../components/ui/icon/icons.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import { ApiError, post } from "../api/client.js";
+import { ApiError, get, post } from "../api/client.js";
 import {
   buildResendVerificationPayload,
   isVerificationRequiredError,
   validateNewPassword
 } from "../utils/email-verification.js";
 import { notify } from "../components/feedback/appFeedback.js";
+import { SUPPORTED_CURRENCIES } from "../utils/currency.js";
 
 export default function AuthPage({ mode }) {
   const isRegister = mode === "register";
@@ -21,6 +22,32 @@ export default function AuthPage({ mode }) {
   const [validationError, setValidationError] = useState("");
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [currencies, setCurrencies] = useState(SUPPORTED_CURRENCIES);
+  const [currencySearch, setCurrencySearch] = useState("");
+  const [baseCurrency, setBaseCurrency] = useState("");
+  const [currencyConfirmed, setCurrencyConfirmed] = useState(false);
+
+  useEffect(() => {
+    if (!isRegister) return;
+    let active = true;
+    get("/schools/currencies")
+      .then((data) => { if (active && Array.isArray(data?.currencies) && data.currencies.length) setCurrencies(data.currencies); })
+      .catch(() => { /* fallback to local list */ });
+    return () => { active = false; };
+  }, [isRegister]);
+
+  const filteredCurrencies = useMemo(() => {
+    const q = currencySearch.trim().toLowerCase();
+    if (!q) return currencies;
+    return currencies.filter((c) =>
+      [c.code, c.name, c.symbol, c.country].some((v) => String(v || "").toLowerCase().includes(q))
+    );
+  }, [currencies, currencySearch]);
+
+  const selectedCurrency = useMemo(
+    () => currencies.find((c) => c.code === baseCurrency) || null,
+    [currencies, baseCurrency]
+  );
 
   const submit = async (event) => {
     event.preventDefault();
@@ -32,6 +59,18 @@ export default function AuthPage({ mode }) {
       [...new FormData(event.currentTarget)].filter(([, value]) => value !== "")
     );
     try {
+      if (isRegister) {
+        if (!baseCurrency) {
+          setValidationError("Select your school's base currency. This is required before financial workflows can be enabled.");
+          return;
+        }
+        if (!currencyConfirmed) {
+          setValidationError("Please confirm the selected base currency. This currency will be used for school-owned financial operations.");
+          return;
+        }
+        values.baseCurrency = baseCurrency;
+        values.currencyConfirmed = true;
+      }
       if (isResend) {
         const { endpoint, body } = buildResendVerificationPayload(values);
         await post(endpoint, body);
@@ -121,6 +160,47 @@ export default function AuthPage({ mode }) {
           <label>School name<input name="schoolName" required minLength="2" maxLength="120" autoComplete="organization" placeholder="e.g. Northstar Academy" /></label>
           <div className="form-grid"><label>Administrator name<input name="adminName" required minLength="2" maxLength="120" autoComplete="name" placeholder="Your name" /></label><label>Phone <span className="optional">(optional)</span><input name="phone" minLength="3" maxLength="30" autoComplete="tel" placeholder="+1 555 0100" /></label></div>
           <label>Work email<input type="email" name="email" required autoComplete="email" placeholder="you@school.edu" /></label>
+          <div className="currency-setup-block">
+            <label>Base currency <span className="required">*</span>
+              <input
+                type="search"
+                value={currencySearch}
+                onChange={(e) => setCurrencySearch(e.target.value)}
+                placeholder="Search by name, code, symbol, or country"
+                autoComplete="off"
+              />
+            </label>
+            <label className="sr-only" htmlFor="baseCurrencySelect">Select base currency</label>
+            <select
+              id="baseCurrencySelect"
+              value={baseCurrency}
+              onChange={(e) => { setBaseCurrency(e.target.value); setCurrencyConfirmed(false); }}
+              required
+              size={Math.min(6, Math.max(4, filteredCurrencies.length || 1))}
+              aria-describedby="currency-setup-help"
+            >
+              <option value="">Select a currency…</option>
+              {filteredCurrencies.map((c) => (
+                <option key={c.code} value={c.code}>{c.code} — {c.name} ({c.symbol})</option>
+              ))}
+            </select>
+            <p id="currency-setup-help" className="field-help">One school = one base currency. This is used for school-owned fees, payroll, expenses, assets, receipts, and reports. Platform SaaS billing stays separate.</p>
+            {selectedCurrency && (
+              <div className="currency-preview" role="status">
+                <strong>Selected: {selectedCurrency.name}</strong>
+                <span>{selectedCurrency.code} · {selectedCurrency.symbol} · {selectedCurrency.fractionDigits} decimal place{selectedCurrency.fractionDigits === 1 ? "" : "s"}</span>
+              </div>
+            )}
+            <label className="currency-confirm-check">
+              <input
+                type="checkbox"
+                checked={currencyConfirmed}
+                onChange={(e) => setCurrencyConfirmed(e.target.checked)}
+                disabled={!baseCurrency}
+              />
+              <span>I confirm <strong>{selectedCurrency ? `${selectedCurrency.code} (${selectedCurrency.name})` : "the selected currency"}</strong> is this school's base currency. It can be changed before financial transactions exist; after that, changes are locked to protect historical records.</span>
+            </label>
+          </div>
         </> : <>
           <label>School workspace<input name="schoolSlug" autoComplete="organization" placeholder="your-school" /></label>
           <label>Email address<input name="email" type="email" required autoComplete="username" placeholder="you@school.edu" /></label>

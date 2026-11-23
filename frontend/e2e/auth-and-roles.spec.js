@@ -120,12 +120,15 @@ test("login displays API rejection without storing a browser-readable token", as
 
 test("school registration surfaces API provisioning errors", async ({ page }) => {
   await page.route(`${api}/auth/csrf`, (route) => respond(route, 200, { csrfToken: "test-csrf-token" }));
+  await page.route(`${api}/schools/currencies`, (route) => respond(route, 200, { currencies: [{ code: "USD", name: "US Dollar", symbol: "$", fractionDigits: 2, country: "US" }, { code: "PKR", name: "Pakistani Rupee", symbol: "Rs", fractionDigits: 2, country: "PK" }] }));
   await page.route(`${api}/auth/register`, (route) => respond(route, 503, null, "School registration is temporarily unavailable"));
   await mockGuestBootstrap(page);
   await page.goto("/register");
   await page.getByLabel("School name").fill("Test Academy");
   await page.getByLabel("Administrator name").fill("School Owner");
   await page.getByLabel("Work email").fill("owner@example.test");
+  await page.getByLabel("Select base currency").selectOption("USD");
+  await page.getByLabel(/I confirm/).check();
   await page.getByLabel("Password").fill("a-strong-password-123");
   await page.getByRole("button", { name: "Create school workspace" }).click();
   await expect(page.getByRole("alert")).toContainText("temporarily unavailable");

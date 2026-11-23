@@ -11,6 +11,7 @@ test("password reset links use the configured frontend origin and preserve the t
     try {
         const {
             appBaseUrl,
+            emailVerificationTemplate,
             passwordResetTemplate
         } = await import("../src/services/email-templates.js");
 
@@ -26,6 +27,10 @@ test("password reset links use the configured frontend origin and preserve the t
         assert.equal(url.searchParams.get("token"), syntheticToken);
         assert.equal(template.html.includes("/reset-password?token="), true);
         assert.equal(template.html.includes("expires in 30 minutes"), true);
+
+        const verification = emailVerificationTemplate({ token: syntheticToken });
+        assert.equal(verification.html.includes("expires in 30 minutes"), true);
+        assert.equal(verification.text.includes("expires in 30 minutes"), true);
     } finally {
         if (previous === undefined) delete process.env.APP_BASE_URL;
         else process.env.APP_BASE_URL = previous;

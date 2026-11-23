@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity, Archive, Bell, BellRing, BookOpen, CalendarDays, ChartNoAxesCombined,
-  CircleDollarSign, FileText, GraduationCap, LayoutDashboard, LibraryBig, LogOut, Menu, PanelLeftClose,
-  Receipt, Boxes, Settings2, Shield, Users, X
+  CircleDollarSign, FileText, GraduationCap, Image, LayoutDashboard, LibraryBig, LogOut, Menu, PanelLeftClose,
+  Receipt, Boxes, Settings2, Shield, ShieldCheck, Users, X
 } from "./ui/icon/icons.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import NotificationBell from "./NotificationBell.jsx";
@@ -17,18 +17,18 @@ const roleGroups = {
   ],
   school_admin: [
     ["Workspace", [["", "Overview", LayoutDashboard], ["students", "Students", GraduationCap], ["staff", "People", Users], ["academics", "Academics", BookOpen], ["attendance", "Attendance", Activity]]],
-    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["reports", "Reports", ChartNoAxesCombined]]],
+    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["student-media/review", "Media review", ShieldCheck], ["student-media/usage", "Media usage", ChartNoAxesCombined], ["reports", "Reports", ChartNoAxesCombined]]],
     ["Administration", [["subscriptions", "Subscription", Shield], ["billing", "Billing history", Receipt], ["school", "School profile", Settings2], ["audit", "Audit log", Activity]]]
   ],
   principal: [
     ["Workspace", [["", "Overview", LayoutDashboard], ["students", "Students", GraduationCap], ["academics", "Academics", BookOpen], ["attendance", "Attendance", Activity]]],
-    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["reports", "Reports", ChartNoAxesCombined]]]
+    ["School operations", [["finance", "Fees & finance", CircleDollarSign], ["exams", "Exams & results", ChartNoAxesCombined], ["inventory", "Inventory", Archive], ["assets", "Fixed assets", Boxes], ["library", "Library", LibraryBig], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["student-media/review", "Media review", ShieldCheck], ["student-media/usage", "Media usage", ChartNoAxesCombined], ["reports", "Reports", ChartNoAxesCombined]]]
   ],
   teacher: [
-    ["My classroom", [["", "Overview", LayoutDashboard], ["attendance", "Attendance", Activity], ["academics", "Timetable", BookOpen], ["exams", "Exams & results", ChartNoAxesCombined], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText]]]
+    ["My classroom", [["", "Overview", LayoutDashboard], ["attendance", "Attendance", Activity], ["academics", "Timetable", BookOpen], ["exams", "Exams & results", ChartNoAxesCombined], ["calendar", "Calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText], ["student-media", "Student media", Image]]]
   ],
   parent: [
-    ["Family", [["", "Overview", LayoutDashboard], ["my-children", "My children", GraduationCap], ["calendar", "School calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText]]]
+    ["Family", [["", "Overview", LayoutDashboard], ["my-children", "My children", GraduationCap], ["moments", "Moments & progress", Image], ["calendar", "School calendar", CalendarDays], ["announcements", "Announcements", Bell], ["notifications", "Notifications", BellRing], ["documents", "Documents", FileText]]]
   ]
 };
 

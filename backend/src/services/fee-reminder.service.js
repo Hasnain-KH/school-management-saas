@@ -23,7 +23,7 @@ export const dispatchSchoolOverdueFeeReminders = async (schoolId, input = {}, pr
         schoolId,
         balanceMinor: { $gt: 0 },
         dueDate: { $lt: new Date(`${reminderDate}T00:00:00.000Z`) }
-    }).select("_id studentId period dueDate currency balanceMinor").limit(input.limit ?? 250).lean();
+    }).select("_id studentId period dueDate currency currencyExponent balanceMinor").limit(input.limit ?? 250).lean();
 
     const result = { examined: vouchers.length, sent: 0, skipped: 0, failed: 0 };
     const failures = [];
@@ -89,6 +89,7 @@ export const dispatchSchoolOverdueFeeReminders = async (schoolId, input = {}, pr
                     dueDate: voucher.dueDate,
                     balanceMinor: voucher.balanceMinor,
                     currency: voucher.currency,
+                    currencyExponent: voucher.currencyExponent,
                     idempotencyKey: `${schoolId}:${voucher._id}:${guardian._id}:${reminderDate}`
                 });
                 delivery.status = "sent";

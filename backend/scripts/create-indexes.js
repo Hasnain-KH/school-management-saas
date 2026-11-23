@@ -42,8 +42,15 @@ import JobRun from "../src/models/job-run.model.js";
 import Notification from "../src/models/notification.model.js";
 import SchoolDocument from "../src/models/document.model.js";
 import Payment from "../src/models/payment.model.js";
+import StudentMedia from "../src/models/student-media.model.js";
+import StudentMediaAccessLog from "../src/models/student-media-access-log.model.js";
+import StudentMediaCleanupTask from "../src/models/student-media-cleanup-task.model.js";
+import StudentMediaConsent from "../src/models/student-media-consent.model.js";
+import StudentMediaDailyUploadBucket from "../src/models/student-media-daily-upload-bucket.model.js";
+import StudentMediaQuota from "../src/models/student-media-quota.model.js";
+import StudentMediaUploadReservation from "../src/models/student-media-upload-reservation.model.js";
 
-const models = [
+export const models = [
     School,
     User,
     RefreshSession,
@@ -84,6 +91,13 @@ const models = [
     Notification,
     SchoolDocument,
     Payment,
+    StudentMedia,
+    StudentMediaAccessLog,
+    StudentMediaCleanupTask,
+    StudentMediaConsent,
+    StudentMediaDailyUploadBucket,
+    StudentMediaQuota,
+    StudentMediaUploadReservation,
     JobRun
 ];
 
