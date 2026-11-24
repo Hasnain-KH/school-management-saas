@@ -13,7 +13,8 @@ See [`backend/docs/ENVIRONMENT.md`](../backend/docs/ENVIRONMENT.md) for the comp
 | Email provider | Optional | Password reset, email verification, overdue fee reminders, welcome/notification mail | `EMAIL_API_KEY`, `EMAIL_FROM` (+ optional `EMAIL_API_URL`, `EMAIL_REPLY_TO`, `REQUIRE_EMAIL_VERIFICATION`) | `503` |
 | Object storage (S3-compatible or Cloudinary) | Optional | Document upload/download | `STORAGE_PROVIDER` plus `STORAGE_*` or `CLOUDINARY_*` | `503` |
 | External scheduler | Optional | Runs overdue-reminder and subscription-expiry jobs | `JOBS_RUNNER_SECRET` | `503` (endpoint disabled) |
-| Payment gateway | Optional (adapter not implemented) | Online subscription checkout; manual payment recording and revenue reporting work without it | — | `503` on checkout |
+| Payment gateway | **Intentionally absent** | No gateway, checkout, webhook, or automated collection is permitted by business decision | — | `503` on the placeholder checkout route |
+| Manual receiving accounts | Yes (operator setup) | Super Admin manages bank/wallet details; School Owners view active details and pay externally | — (platform data) | Read-only safe projection |
 | Monitoring/alerting | Recommended | Alerting on errors and failed jobs | — (platform-native) | Vercel runtime logs only |
 
 ## 1. MongoDB Atlas (required)
@@ -78,7 +79,7 @@ Safe rollout: configure and test delivery first, then set `REQUIRE_EMAIL_VERIFIC
 
 ## 4. Document storage (optional)
 
-Uploads are sent as base64 JSON to `POST /api/v1/documents` (this is why the app needs no multipart parser and works unchanged on serverless). Files are stored in either **S3-compatible** object storage — AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO, and similar — or in **Cloudinary**. `STORAGE_PROVIDER` selects the default adapter (`s3` or `cloudinary`); Cloudinary is never selected implicitly.
+Documents can be uploaded as base64 JSON to `POST /api/v1/documents` (no multipart parser is needed). For large student media, the preferred architecture is the direct-to-storage flow described below; the legacy JSON path remains as a fallback only where the platform body limit permits it. Files are stored in either **S3-compatible** object storage — AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO, and similar — or in **Cloudinary**. `STORAGE_PROVIDER` selects the default adapter (`s3` or `cloudinary`); Cloudinary is never selected implicitly.
 
 Downloads are served through short-lived signed URLs (15-minute default). School logos are streamed through the authenticated same-origin proxy at `GET /api/v1/schools/me/logo`; the browser never sees a bucket URL or a Cloudinary host.
 
@@ -158,19 +159,21 @@ Jobs:
 
 Set `ENABLE_DEV_SCHEDULER=true` to run an in-process scheduler (interval `DEV_SCHEDULER_INTERVAL_MS`, default 24h). **Never enable this in production.**
 
-## 6. Payments
+## 6. Manual subscription payments
 
-**Payment recording and revenue reporting are implemented and work without any gateway.** `src/services/payment.service.js` records subscription payments per school (`manual` or `gateway`), and the platform revenue report aggregates them by currency, month, and plan. Manual (offline) payments — bank transfer, cash, JazzCash/Easypaisa receipt entered by an operator — are recorded by a platform super admin via `POST /api/v1/platform/schools/:schoolId/payments`, optionally activating or extending the school's subscription in the same transaction. This is the realistic default for Pakistani private schools and requires no third-party account.
+**SchoolFlow has no payment gateway by design.** There is no checkout page, provider SDK, webhook implementation, receipt upload, payment submission, automated collection, automated verification, or automatic subscription activation. `src/services/payment-gateway.provider.js` remains an unregistered interface and the checkout route returns `503`; do not add an adapter.
 
-**The online gateway adapter is not implemented.** `src/services/payment-gateway.provider.js` is a provider **interface with no adapter**. Gateway checkout (`POST /api/v1/platform/schools/:schoolId/checkout`) and the webhook (`POST /api/v1/payments/webhook`) are wired end to end — a pending payment is created, and the webhook applies a verified event idempotently and extends the subscription — but both return `503` until an adapter is registered. To add one (for example Stripe or a local processor such as JazzCash/Easypaisa):
+The supported flow is entirely manual:
 
-1. Implement `createCheckoutSession` and `verifyWebhook` and register the adapter in the startup path (`configurePaymentGatewayProvider`).
-2. In `verifyWebhook`, enforce provider-specific **signature** verification against the raw body, and reject unverified events. The service already performs idempotency (a paid reference is never reprocessed) and ownership checks (the reference must match a recorded payment).
-3. Store only non-sensitive references (`providerReference`); never log card/credential data.
+1. The **Super Admin** manages platform receiving accounts (bank, JazzCash, Easypaisa, or other) in **Platform → Revenue → Receiving accounts**.
+2. The **School Owner** views active accounts in **Subscription → Billing history** and copies the reference details.
+3. The School Owner pays **outside SchoolFlow**.
+4. The Super Admin independently verifies the payment externally.
+5. Only then does the Super Admin record the payment via `POST /api/v1/platform/schools/:schoolId/payments` and manually activate/renew the subscription using the existing workflow.
 
-Until an adapter exists, checkout-dependent screens must report the feature as unavailable rather than faking a payment.
+Receiving accounts are platform-scoped, strict Super Admin CRUD, and write platform audit logs. School Owners have one read-only endpoint, `GET /api/v1/schools/receiving-accounts`, which returns active accounts only and a safe projection. Server validation rejects credential markers (password, PIN, OTP, CVV, secret). Full API details, the operational SOP, and testing commands are in [`docs/MANUAL-PAYMENTS.md`](./MANUAL-PAYMENTS.md).
 
-**Verify (manual path):** record a manual payment with `applySubscription: true` for a test school, confirm the payment appears in `GET /api/v1/schools/billing` and `GET /api/v1/platform/payments`, and confirm the revenue report totals reflect it. Checkout returns `503` until a gateway is configured.
+**Verify (manual path):** create a test receiving account, confirm a School Owner sees it and can copy its reference while inactive accounts stay hidden, then record a manual payment with `applySubscription: true` for a test school and confirm the payment appears in `GET /api/v1/schools/billing`, `GET /api/v1/platform/payments`, and the revenue report. Subscription state must change only at the explicit recording step.
 
 ## 7. Monitoring and alerting (recommended)
 

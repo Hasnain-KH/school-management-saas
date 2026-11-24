@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { X } from "./ui/icon/icons.jsx";
 import { confirmUnsavedNavigation, setUnsavedSource } from "./feedback/unsavedChanges.js";
 
@@ -11,6 +11,7 @@ export default function Modal({
   role = "dialog",
   ariaDescribedBy,
   hideHeader = false,
+  titleId: providedTitleId,
   closeLabel = "Close dialog",
   dirty = false,
   dirtyMessage = "You have unsaved changes. Close without saving?",
@@ -18,6 +19,8 @@ export default function Modal({
   closeBlockedMessage = "Please wait for the current action to finish."
 }) {
   const dialogRef = useRef(null);
+  const generatedTitleId = useId();
+  const titleId = providedTitleId || generatedTitleId;
   const previousFocus = useRef(null);
   const onCloseRef = useRef(onClose);
   const dirtyRef = useRef(dirty);
@@ -127,12 +130,12 @@ export default function Modal({
       className={`${dialogClassName}${closing ? " modal-card-closing" : ""}`}
       role={role}
       aria-modal="true"
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
       aria-describedby={ariaDescribedBy}
       tabIndex={-1}
     >
       {!hideHeader && <header className="modal-header">
-        <h2 id="modal-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button type="button" className="icon-button" onClick={requestClose} aria-label={closeLabel}><X size={18} aria-hidden="true" /></button>
       </header>}
       {children}

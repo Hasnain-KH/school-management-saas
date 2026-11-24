@@ -65,7 +65,8 @@ Trigger a deployment (push to the tracked branch, or run `vercel --prod`). Durin
 2. **Create the default plans.** Either set `SEED_DEFAULT_PLANS=true` for one deployment, or run `npm run db:seed-plans` from `backend/`. Public school registration requires an active default-trial plan.
 3. **Provision a platform super admin.** There is no public endpoint for this role; create it through a trusted operational process.
 4. **Configure the Atlas network access** so the deployed functions can reach the cluster, using an approved/restricted configuration. Do not expose a production cluster broadly.
-5. **Optional providers.** To enable email, document storage, and scheduled reminders, see [`docs/EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md).
+5. **Add manual receiving accounts.** Sign in as the Super Admin and open **Platform → Revenue → Receiving accounts**. Add the bank/JazzCash/Easypaisa/other details that schools should pay, keep them active, and publish the instructions. Do not store passwords, PINs, OTPs, or other credentials. See [`docs/MANUAL-PAYMENTS.md`](./MANUAL-PAYMENTS.md).
+6. **Optional providers.** To enable email, document storage, and scheduled reminders, see [`docs/EXTERNAL-SERVICES.md`](./EXTERNAL-SERVICES.md).
 
 ## 7. Scheduled jobs
 
@@ -84,7 +85,8 @@ After deploying, verify:
 - [ ] Creating a record persists after a refresh (Atlas connection and transactions work).
 - [ ] Rate limiting returns `429` under repeated attempts and does not return `503` (Redis is reachable).
 - [ ] If email is configured, a password-reset request sends mail; otherwise it returns an explicit `503`.
-- [ ] Upload a 5 MiB document and a 25 MiB student video. Verify whether the platform returns `413 FUNCTION_PAYLOAD_TOO_LARGE` before the application sees the request; see the body-size limitation below.
+- [ ] A Super Admin can create, edit, deactivate, and delete a receiving account; a School Owner sees only active accounts and can copy references.
+- [ ] Upload a 5 MiB document. For a 25 MiB student video, verify whether the platform returns `413 FUNCTION_PAYLOAD_TOO_LARGE` before the application sees the request; use the direct-to-storage flow for large media (see the body-size limitation below and §11).
 
 ## 9. Troubleshooting
 
@@ -100,9 +102,11 @@ After deploying, verify:
 ## 10. Known limitations
 
 - No live Vercel deployment has been verified from this repository.
-- Vercel's default function request-body limit (4.5 MB) is smaller than the application's document and student-media JSON limits (8 MB and 38 MB). Large uploads may be rejected by the platform before Express can return its safe 413 response. The optional larger-body configuration still does not cover a 25 MiB video encoded as base64; use a chunked/direct-to-storage upload flow or lower the accepted media sizes before relying on those uploads in production.
-- Cross-site (different registrable domain) frontend/API deployment is not supported by the current cookie settings; keep them same-site.
-- Online payment **checkout** is a provider interface without an adapter; manual payment recording and revenue reporting are implemented and work without a gateway.
+- **Vercel plan/commercial eligibility is unverified.** Confirm with Vercel and your legal/account owner that the intended plan permits commercial SaaS use, expected bandwidth, function concurrency, and any required security/compliance features before launch. Do not assume eligibility from this repository.
+- Vercel's default function request-body limit (4.5 MB) is smaller than the application's document (8 MB) and student-media (38 MB) JSON limits. Large base64 uploads may be rejected by the platform before Express can return its safe 413 response. The direct-to-storage workflow in §11 is the **preferred** path for large student media; the legacy base64 endpoint is a compatibility fallback and is not Vercel-compatible for large files.
+- Cross-site (different registrable domain) frontend/API deployment is not supported by the current cookie settings; keep them same-site. The static CSP also needs exact storage upload origins added before enabling browser direct uploads with non-Cloudinary providers.
+- Payment checkout is intentionally unavailable. Manual receiving accounts, external payment, independent Super Admin verification, and manual subscription activation are the only supported path.
+- MongoDB backups/PITR, restore rehearsal, monitoring, alerting, and automated scheduling are external operator responsibilities and are not provided by this repository.
 - An external monitoring/alerting integration should be added before production traffic.
 
 ## 11. Direct student-media uploads (CSP and storage origins)

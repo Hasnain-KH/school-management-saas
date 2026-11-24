@@ -5,17 +5,34 @@ import { configureEmailDeliveryFromEnv } from "./services/email-delivery.provide
 import { configureDocumentStorageFromEnv } from "./services/document-storage.provider.js";
 import { maybeAutoSeedDefaultPlans } from "./services/plan-seed.service.js";
 
-// Provider configuration and plan seeding only need to happen once per warm
-// serverless instance, not on every request.
-let initialized = false;
+// Provider configuration and plan seeding happen once per warm instance. A
+// module-scope promise (rather than a boolean) prevents concurrent cold
+// invocations from configuring providers twice or racing each other.
+let initializationPromise;
 
-const initialize = async () => {
-    if (initialized) return;
-    configureEmailDeliveryFromEnv();
-    configureDocumentStorageFromEnv();
-    await maybeAutoSeedDefaultPlans();
-    initialized = true;
+const initialize = () => {
+    if (!initializationPromise) {
+        initializationPromise = (async () => {
+            configureEmailDeliveryFromEnv();
+            configureDocumentStorageFromEnv();
+            await maybeAutoSeedDefaultPlans();
+        })().catch((error) => {
+            // Allow the next invocation to retry instead of stranding a warm
+            // instance in a permanently half-initialized state.
+            initializationPromise = undefined;
+            throw error;
+        });
+    }
+    return initializationPromise;
 };
+
+const dispatch = (req, res) => new Promise((resolve, reject) => {
+    const done = () => resolve();
+    res.once("finish", done);
+    res.once("close", done);
+    res.once("error", reject);
+    app(req, res);
+});
 
 export default async function handler(req, res) {
     try {
@@ -23,7 +40,7 @@ export default async function handler(req, res) {
         app.set("trust proxy", trustProxyHops);
         await connectDB();
         await initialize();
-        return app(req, res);
+        return await dispatch(req, res);
     } catch (error) {
         console.error("SchoolFlow serverless request failed", {
             name: error?.name ?? "Error",

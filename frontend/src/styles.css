@@ -1531,3 +1531,19 @@ input[type="file"] { padding: 8px; font-size: var(--fs-xs); }
 .currency-settings-card .detail-item strong { font-size: 0.95rem; }
 .currency-lock-note { padding: 0.75rem 0.875rem; border-radius: 0.75rem; background: var(--warning-bg, #fff8e6); color: var(--warning-text, #7a5a00); font-size: 0.875rem; }
 .currency-config-banner { padding: 1rem; border: 1px solid var(--warning-border, #f0d58c); border-radius: 1rem; background: var(--warning-bg, #fffaf0); display: grid; gap: 0.75rem; }
+
+/* Manual receiving accounts (platform admin + school-owner billing) */
+.badge-neutral { color: var(--text-muted); background: var(--surface-2); border-color: var(--line); }
+.manual-payment-steps { margin: 0 0 var(--space-4); padding-left: 1.25rem; display: grid; gap: 6px; color: var(--text-muted); font-size: var(--fs-sm); }
+.manual-payment-steps li::marker { color: var(--primary); font-weight: var(--fw-bold); }
+.receiving-account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
+.receiving-account-card { display: grid; gap: 0.6rem; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card, 1rem); background: var(--surface-2); }
+.receiving-account-card header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.receiving-account-title { margin: 0; font-weight: var(--fw-semibold); }
+.receiving-account-details { display: grid; gap: 0.5rem; margin: 0; }
+.receiving-account-detail { display: grid; gap: 0.2rem; }
+.receiving-account-detail dt { color: var(--text-muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; }
+.receiving-account-detail dd { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin: 0; }
+.receiving-account-detail code { word-break: break-all; font-size: var(--fs-sm); }
+.receiving-account-instructions { margin: 0; font-size: var(--fs-sm); }
+.receiving-account-card p { margin-top: 0; }

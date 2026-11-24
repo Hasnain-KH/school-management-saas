@@ -5,6 +5,7 @@ import {
     getCurrentSchool,
     getCurrentSubscription,
     getSupportedCurrencies,
+    listReceivingAccounts,
     updateCurrentSchool
 } from "../controllers/school.controller.js";
 import { getLogo, removeLogo, uploadLogo } from "../controllers/school-logo.controller.js";
@@ -49,6 +50,14 @@ router.put(
     configureCurrentCurrency
 );
 router.get("/billing", requirePermission("school:read"), validate(schoolPaymentQuerySchema, "query"), listSchoolPayments);
+// School owners may only READ active platform receiving details. Mutations are
+// exclusively on the super-admin platform router.
+router.get(
+    "/receiving-accounts",
+    requirePermission("school:read"),
+    requireRoles("school_admin"),
+    listReceivingAccounts
+);
 router.patch("/me", requirePermission("school:update"), validate(updateSchoolSchema), updateCurrentSchool);
 
 export default router;

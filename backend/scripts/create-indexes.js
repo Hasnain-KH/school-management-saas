@@ -42,6 +42,7 @@ import JobRun from "../src/models/job-run.model.js";
 import Notification from "../src/models/notification.model.js";
 import SchoolDocument from "../src/models/document.model.js";
 import Payment from "../src/models/payment.model.js";
+import PlatformReceivingAccount from "../src/models/platform-receiving-account.model.js";
 import StudentMedia from "../src/models/student-media.model.js";
 import StudentMediaAccessLog from "../src/models/student-media-access-log.model.js";
 import StudentMediaCleanupTask from "../src/models/student-media-cleanup-task.model.js";
@@ -91,6 +92,7 @@ export const models = [
     Notification,
     SchoolDocument,
     Payment,
+    PlatformReceivingAccount,
     StudentMedia,
     StudentMediaAccessLog,
     StudentMediaCleanupTask,

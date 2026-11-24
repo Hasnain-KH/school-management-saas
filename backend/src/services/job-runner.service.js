@@ -169,8 +169,10 @@ export const runAllJobs = async (options = {}) => {
 };
 
 // Optional in-process scheduler for local development and long-running hosts.
-// Never enabled by default: Vercel should use the secured /api/v1/jobs/run
-// endpoint driven by Vercel Cron or an external scheduler.
+// Never enabled by default. On Vercel, drive the secured POST /api/v1/jobs/run
+// endpoint with an external scheduler that can send the x-jobs-secret header.
+// Vercel Cron sends GET + Authorization: Bearer and cannot call this endpoint
+// directly; see docs/DEPLOYMENT-VERCEL.md.
 export const startDevScheduler = () => {
     if (process.env.ENABLE_DEV_SCHEDULER !== "true") return null;
     const intervalMs = Number(process.env.DEV_SCHEDULER_INTERVAL_MS ?? DAY_MS);

@@ -40,14 +40,20 @@ These routes require a provisioned `platform_super_admin` and `platform:manage`;
 | GET | `/platform/schools?status=...&search=...` | Paginated platform-wide school directory |
 | PATCH | `/platform/schools/:schoolId/status` | Set school status to `trial`, `active`, `suspended`, or `expired`; active/trial status requires a valid subscription and eligible assigned plan |
 | PATCH | `/platform/schools/:schoolId/subscription` | Assign an active plan and update subscription lifecycle dates/status; trial uses the configured default-trial plan |
-| POST | `/platform/schools/:schoolId/payments` | Record an offline (manual) payment; optionally activate/extend the school's subscription from it |
-| POST | `/platform/schools/:schoolId/checkout` | Create a gateway checkout session for a paid plan (returns `503` until a payment gateway adapter is configured) |
+| POST | `/platform/schools/:schoolId/payments` | Record an offline (manual) payment after independent verification; optionally activate/extend the school's subscription from it |
+| POST | `/platform/schools/:schoolId/checkout` | Gateway placeholder. No adapter exists by business decision; always returns `503`. Do not implement checkout. |
 | GET | `/platform/payments?schoolId=&status=` | Paginated platform-wide payment records |
-| GET | `/platform/reports/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD` | Revenue report: paid totals by currency, by month, and by plan, plus pending (outstanding) amounts |
+| GET | `/platform/reports/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD` | Revenue report: paid totals by currency, by month, and by plan, plus pending (outstanding) legacy records |
+| GET/POST | `/platform/receiving-accounts` | List/create platform-scoped manual receiving accounts (`isActive`, `search`, pagination on GET) |
+| PATCH | `/platform/receiving-accounts/:accountId` | Edit a receiving account (strict validation; credential markers rejected) |
+| PATCH | `/platform/receiving-accounts/:accountId/status` | Activate/deactivate a receiving account |
+| DELETE | `/platform/receiving-accounts/:accountId?confirm=true` | Delete after explicit confirmation |
 
 Plan changes, subscription assignment, school status changes, payment recording, and their audit records are transactional. Deactivating a plan prevents new assignments but does not silently remove current subscribers' entitlements. Feature flags are checked on school API routes. Student, active staff, and branch caps are checked against tenant records during transactional creation; lowering a plan cap does not delete existing records.
 
-Payments are recorded per school with amount, currency, status (`pending`, `paid`, `failed`, `refunded`), and method (`manual` or `gateway`). Recording a manual payment marks it paid and audits it; passing `applySubscription: true` also activates or extends the subscription. Gateway payments are created as `pending` and become `paid` only after a verified webhook (see `POST /payments/webhook`). All revenue figures are aggregated from these records; none are hardcoded.
+Payments are recorded per school with amount, currency, status (`pending`, `paid`, `failed`, `refunded`), and method (`manual` or `gateway`). Recording a manual payment marks it paid and audits it; passing `applySubscription: true` also activates or extends the subscription. There is no gateway adapter: `checkout` and the webhook remain fail-closed placeholders returning `503` and must not be treated as usable features. All revenue figures are aggregated from recorded payments; none are hardcoded.
+
+Receiving accounts are platform-scoped (`schoolId: null`) and are managed exclusively through the routes above. School Owners can read **active** accounts through `GET /api/v1/schools/receiving-accounts` (`school_admin` only), which returns a safe projection with account reference fields and instructions. Bank/PIN/OTP/secret values are rejected by validation. See [`docs/MANUAL-PAYMENTS.md`](../../docs/MANUAL-PAYMENTS.md) for the full operational workflow.
 
 ## School profile
 
@@ -56,6 +62,7 @@ Payments are recorded per school with amount, currency, status (`pending`, `paid
 | GET | `/schools/me` | Authenticated school member | — |
 | PATCH | `/schools/me` | School admin | At least one of `name`, `phone`, `address`, `settings.attendanceLateGraceMinutes`, `settings.attendanceStartTime` |
 | GET | `/schools/subscription` | Authenticated school member | — |
+| GET | `/schools/receiving-accounts` | School admin only | Read-only active platform receiving accounts for manual payments |
 
 Profile writes use the authenticated user's school ID in the database filter. Client-provided tenant IDs are rejected by strict validation. Administrative profile updates are recorded in the audit collection.
 
@@ -251,7 +258,7 @@ All report data endpoints require `reports:read` and the `reports` plan feature.
 | GET | `/portal/parent/students` | Parent account | List only students linked to a same-school Guardian whose account is linked to the parent's user id |
 | GET | `/portal/parent/students/:studentId/attendance?from=YYYY-MM-DD&to=YYYY-MM-DD` | Linked parent only | Up to 100 same-tenant attendance records |
 | GET | `/portal/parent/students/:studentId/fees` | Linked parent only | Read-only fee voucher balances and immutable payment history for the linked student |
-| GET | `/portal/parent/students/:studentId/results` | Linked parent only | Marks for published exams for the linked student's class |
+| GET | `/portal/parent/students/:studentId/results` | Linked parent only | Marks for published exams, enriched with exam, class, and subject display names so raw database identifiers are never shown |
 | GET | `/portal/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | Authenticated school member | Calendar events filtered to the caller's role audience |
 | GET | `/audit` | School admin with `audit:read` | Paginated school audit events, optionally filtered by `action`, `resourceType`, and date range |
 | GET | `/platform/audit` | Platform super admin | Paginated platform audit events |

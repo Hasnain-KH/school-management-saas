@@ -475,7 +475,7 @@ test("teacher daily upload limit is enforced", async (t) => {
 });
 
 test("parent access is denied after consent withdrawal and no new URL is issued", async (t) => {
-  mockAccessLog(t); resetNotifs();
+  mockAudit(t); mockAccessLog(t); resetNotifs();
   const storage = makeStorage(); registerDocumentStorageProvider("s3", storage); configureDocumentStorageProvider(storage, "s3");
   globalThis.__testLinkedIds = [STUDENT_A];
   const media = { _id: MEDIA_A, schoolId: SCHOOL_A, isActive: true, publicationStatus: "published", reviewStatus: "approved", consentStatus: "verified", studentIds: [STUDENT_A], storageKey: "k", contentType: "image/png", fileName: "x.png", category: "photo" };
@@ -777,7 +777,7 @@ test("signed URL TTL is configurable, bounded, and defaulted", async (t) => {
 });
 
 test("consent withdrawal blocks new URL issuance for all roles", async (t) => {
-  mockAccessLog(t);
+  mockAudit(t); mockAccessLog(t);
   const storage = makeStorage(); registerDocumentStorageProvider("s3", storage); configureDocumentStorageProvider(storage, "s3");
   const media = { _id: MEDIA_A, schoolId: SCHOOL_A, isActive: true, publicationStatus: "published", reviewStatus: "approved", consentStatus: "verified", studentIds: [STUDENT_A], storageKey: "k", contentType: "image/png", fileName: "x.png", category: "photo" };
   t.mock.method(StudentMedia, "findOne", () => ({ lean: async () => media }));

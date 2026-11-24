@@ -1,4 +1,5 @@
 import AcademicClass from "../models/academic-class.model.js";
+import ClassSubject from "../models/class-subject.model.js";
 import Exam from "../models/exam.model.js";
 import ExamMark from "../models/exam-mark.model.js";
 import FeePayment from "../models/fee-payment.model.js";
@@ -8,6 +9,7 @@ import Student from "../models/student.model.js";
 import StudentAttendance from "../models/student-attendance.model.js";
 import StudentGuardian from "../models/student-guardian.model.js";
 import Section from "../models/section.model.js";
+import Subject from "../models/subject.model.js";
 import { HttpError } from "../utils/http-error.js";
 
 const tenantId = (req) => {
@@ -124,9 +126,37 @@ export const getParentStudentResults = async (req, studentId) => {
         status: "published"
     }).select("_id name academicSessionId publishedAt").sort({ publishedAt: -1 }).limit(50).lean();
     if (!exams.length) return [];
-    return ExamMark.find({
+    const marks = await ExamMark.find({
         schoolId,
         studentId,
         examId: { $in: exams.map(({ _id }) => _id) }
     }).select("examId classSubjectId marksObtained enteredAt").sort({ enteredAt: -1 }).limit(250).lean();
+    if (!marks.length) return [];
+
+    // Resolve display names in three bounded queries so parents never see raw
+    // database references. Every lookup stays inside the authenticated tenant.
+    const [classSubjects, subjects, classes] = await Promise.all([
+        ClassSubject.find({ schoolId, _id: { $in: marks.map((mark) => mark.classSubjectId) } })
+            .select("subjectId classId").lean(),
+        Subject.find({ schoolId, _id: { $in: classSubjects.map((item) => item.subjectId) } }).select("name code").lean(),
+        AcademicClass.find({ schoolId, _id: { $in: classSubjects.map((item) => item.classId) } }).select("name code").lean()
+    ]);
+    const classSubjectById = new Map(classSubjects.map((item) => [String(item._id), item]));
+    const subjectById = new Map(subjects.map((item) => [String(item._id), item]));
+    const classById = new Map(classes.map((item) => [String(item._id), item]));
+    const examById = new Map(exams.map((item) => [String(item._id), item]));
+
+    return marks.map((mark) => {
+        const classSubject = classSubjectById.get(String(mark.classSubjectId));
+        const subject = classSubject ? subjectById.get(String(classSubject.subjectId)) : null;
+        const academicClass = classSubject ? classById.get(String(classSubject.classId)) : null;
+        const exam = examById.get(String(mark.examId));
+        return {
+            ...mark,
+            examName: exam?.name || null,
+            subjectName: subject?.name || null,
+            subjectCode: subject?.code || null,
+            className: academicClass?.name || null
+        };
+    });
 };

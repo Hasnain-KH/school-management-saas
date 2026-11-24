@@ -58,6 +58,8 @@ export default function PortalShell() {
   });
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef(null);
+  const accountButtonRef = useRef(null);
+  const accountMenuRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
   const groups = roleGroups[user?.role] || [];
@@ -84,11 +86,34 @@ export default function PortalShell() {
   useEffect(() => {
     if (!accountOpen) return;
     const onPointer = (event) => { if (accountRef.current && !accountRef.current.contains(event.target)) setAccountOpen(false); };
-    const onKey = (event) => { if (event.key === "Escape") setAccountOpen(false); };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        setAccountOpen(false);
+        accountButtonRef.current?.focus();
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const items = [...(accountMenuRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+        if (!items.length) return;
+        event.preventDefault();
+        const index = items.indexOf(document.activeElement);
+        const next = event.key === "ArrowDown"
+          ? (index + 1) % items.length
+          : (index <= 0 ? items.length - 1 : index - 1);
+        items[next].focus();
+      }
+    };
     document.addEventListener("mousedown", onPointer);
     document.addEventListener("keydown", onKey);
+    accountMenuRef.current?.querySelector('[role="menuitem"]')?.focus();
     return () => { document.removeEventListener("mousedown", onPointer); document.removeEventListener("keydown", onKey); };
   }, [accountOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   const logout = async () => {
     try {
@@ -107,16 +132,16 @@ export default function PortalShell() {
       <div className="brand">
         <SchoolLogo className="brand-mark" size={19} />
         <span>school<span className="brand-light">flow</span></span>
-        <button className="sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><X size={20} /></button>
-        <button className="sidebar-collapse" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-pressed={collapsed} title={collapsed ? "Expand navigation" : "Collapse navigation"}><PanelLeftClose size={17} /></button>
+        <button type="button" className="sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><X size={20} aria-hidden="true" /></button>
+        <button type="button" className="sidebar-collapse" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-pressed={collapsed} title={collapsed ? "Expand navigation" : "Collapse navigation"}><PanelLeftClose size={17} aria-hidden="true" /></button>
       </div>
-      <div className="school-switcher" aria-label={school?.name || "Platform workspace"}>
+      <div className="school-switcher" role="group" aria-label={school?.name || "Platform workspace"}>
         <SchoolLogo className="school-avatar" size={20} fallback={school?.name?.slice(0, 1) || "S"} />
         <div className="school-label"><strong>{school?.name || "SchoolFlow"}</strong><span>{school ? school.subscription?.plan || "School workspace" : "Platform workspace"}</span></div>
       </div>
       <nav className="sidebar-nav" aria-label="Main navigation">
-        {groups.map(([group, links]) => <section key={group} className="nav-group">
-          <div className="nav-group-title">{group}</div>
+        {groups.map(([group, links]) => <section key={group} className="nav-group" role="group" aria-label={group}>
+          <div className="nav-group-title" aria-hidden="true">{group}</div>
           {links.map(([to, label, Icon]) => <NavLink key={to} to={`/${to}`} end={to === ""} onClick={(event) => {
             if (!confirmUnsavedNavigation()) { event.preventDefault(); return; }
             setMenuOpen(false);
@@ -126,24 +151,24 @@ export default function PortalShell() {
       <div className="sidebar-footer">
         <div className="help-card"><div className="help-dot" /><strong>Workspace status</strong><span>{school?.status || "Platform access"}</span></div>
         <div className="profile-block"><span className="profile-avatar" aria-hidden="true"><SchoolLogo size={16} fallback={userInitial} /></span><span className="profile-copy"><strong>{user?.name}</strong><small>{roleName(user?.role)}</small></span></div>
-        <button className="profile-signout" onClick={logout}><LogOut size={16} aria-hidden="true" /><span>Sign out</span></button>
+        <button type="button" className="profile-signout" onClick={logout}><LogOut size={16} aria-hidden="true" /><span>Sign out</span></button>
       </div>
     </aside>
-    {menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
+    {menuOpen && <button type="button" className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
     <main id="main-content" tabIndex={-1} className={`main-area ${collapsed ? "main-area-wide" : ""}`}>
       <header className="topbar">
-        <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={21} /></button>
+        <button type="button" className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation" aria-expanded={menuOpen}><Menu size={21} aria-hidden="true" /></button>
         <div className="breadcrumbs"><span>{school?.name || "SchoolFlow"}</span><span className="crumb-slash">/</span><strong>{currentLabel}</strong></div>
         <div className="topbar-actions">
           {user?.role !== "platform_super_admin" && <NotificationBell />}
           <span className="status-pill">{school?.status || roleName(user?.role)}</span>
           <div className="account" ref={accountRef}>
-            <button className="topbar-avatar" onClick={() => setAccountOpen((value) => !value)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><SchoolLogo size={16} fallback={userInitial} /></button>
-            {accountOpen && <div className="account-menu" role="menu">
+            <button ref={accountButtonRef} type="button" className="topbar-avatar" onClick={() => setAccountOpen((value) => !value)} aria-haspopup="menu" aria-expanded={accountOpen} aria-controls="account-menu" aria-label="Account menu"><SchoolLogo size={16} fallback={userInitial} /></button>
+            {accountOpen && <div id="account-menu" ref={accountMenuRef} className="account-menu" role="menu" aria-label="Account menu">
               <header><strong>{user?.name}</strong><small>{roleName(user?.role)}{school?.name ? ` · ${school.name}` : ""}</small></header>
-              {accountLinks(user?.role).map(([label, to, Icon]) => <button key={to} className="menu-item" role="menuitem" onClick={() => { if (!confirmUnsavedNavigation()) return; navigate(to); }}><Icon size={16} aria-hidden="true" />{label}</button>)}
+              {accountLinks(user?.role).map(([label, to, Icon]) => <button type="button" key={to} className="menu-item" role="menuitem" onClick={() => { if (!confirmUnsavedNavigation()) return; navigate(to); }}><Icon size={16} aria-hidden="true" />{label}</button>)}
               <div className="menu-sep" />
-              <button className="menu-item menu-item-danger" role="menuitem" onClick={logout}><LogOut size={16} aria-hidden="true" />Sign out</button>
+              <button type="button" className="menu-item menu-item-danger" role="menuitem" onClick={logout}><LogOut size={16} aria-hidden="true" />Sign out</button>
             </div>}
           </div>
         </div>

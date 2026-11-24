@@ -8,6 +8,7 @@ import { canSubmitFeedback } from "./feedbackHelpers.js";
 /** Shared confirmation/status surface used by the appFeedback API. */
 export default function StatusDialog({ dialog, onClose }) {
   const descriptionId = useId();
+  const titleId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const locked = useRef(false);
@@ -42,6 +43,7 @@ export default function StatusDialog({ dialog, onClose }) {
     role="dialog"
     className="modal-card-confirm"
     ariaDescribedBy={descriptionId}
+    titleId={titleId}
     hideHeader
     closeLabel="Close dialog"
   >
@@ -51,7 +53,7 @@ export default function StatusDialog({ dialog, onClose }) {
         tone={presentation.tone}
         className="confirm-status motion-pop"
       />
-      <h2 className="confirm-title" id="modal-title">{dialog.title}</h2>
+      <h2 className="confirm-title" id={titleId}>{dialog.title}</h2>
       {dialog.message && <p className="confirm-message" id={descriptionId}>{dialog.message}</p>}
       {error && <p className="confirm-error" role="alert">{error}</p>}
       <div className="confirm-actions">

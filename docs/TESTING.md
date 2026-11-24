@@ -1,20 +1,36 @@
 # Testing report
 
-This report records the test commands, the **real** counts observed from a clean run in this repository, what is covered, and what is not. Counts are from the working tree of this session (Node 24, Windows).
+This report records the **actual** commands and counts observed in the final audit working tree on 2026-11-24 (Windows, Node 24). No deployment, provider call, staging operation, commit, push, or production-data operation was performed. Counts are for the uncommitted working tree at HEAD `ff710da`.
 
-## Commands and results
+## Final commands and results
 
-| Suite | Command | Tests | Pass | Fail | Skipped |
-|---|---|---|---|---|---|
-| Backend | `npm test --workspace backend` | 122 | 119 | 0 | 3 |
-| Frontend | `npm test --workspace frontend` | 12 | 12 | 0 | 0 |
-| Build | `npm run build --workspace frontend` | — | ✅ success | — | — |
+| Check | Command | Result |
+|---|---|---|
+| Backend suite | `npm test --workspace backend` | **291 tests, 288 pass, 0 fail, 3 skipped**, exit 0 |
+| Frontend unit tests | `npm test --workspace frontend` | **83 tests, 83 pass, 0 fail**, exit 0 |
+| Browser E2E | `npx playwright test --reporter=line --timeout=20000` from `frontend/` | **45 passed**, exit 0 |
+| Production build | `npm run build --workspace frontend` | ✅ success, 2255 modules transformed, built in 1m 2s |
+| Icon check | `npm run check:icons --workspace frontend` | ✅ passed; 54 source files scanned, 3 documented manual-review image candidates, 0 application icon violations |
+| Whitespace check | `git diff --check` | ✅ exit 0; only LF→CRLF working-copy warnings, no whitespace errors |
+| Lint | — | **Not configured** (no lint script/config) |
+| Type check | — | **Not configured** (no TypeScript/type-check script in this JavaScript project) |
 
-The backend suite is `node --test`; the frontend suite runs its `test/*.test.js` files the same way. The frontend build produced 2230 modules with no errors.
+A full-suite run initially exposed two student-media consent-invalidation tests that lacked the existing `AuditLog.prototype.save` mock. The test mocks were corrected; the final full backend suite is green. No production code was weakened to hide the failure.
+
+## Baseline comparison
+
+| Suite | Earlier baseline | Final | Delta |
+|---|---|---:|---:|
+| Backend | 282 total / 279 pass / 3 skipped | 291 / 288 / 3 | +9 tests, +9 pass |
+| Frontend | 80 pass | 83 pass | +3 tests |
+| Browser E2E | 43 passed | 45 passed | +2 tests |
+| Icon scan | 53 files / 0 violations | 54 files / 0 violations | +1 file |
+
+The backend delta is the new receiving-account test file. The frontend delta is the receiving-account helper tests. The E2E delta is the Super Admin / School Owner receiving-account browser flows.
 
 ## Backend coverage
 
-Ten test files under `backend/test/`:
+The backend suite now includes 11 test files:
 
 | File | Focus |
 |---|---|
@@ -25,54 +41,51 @@ Ten test files under `backend/test/`:
 | `security.test.js` | CSRF, cookie flags, header hardening, rate limiting |
 | `production-cookie.test.js` | Production cookie attributes and CSRF enforcement |
 | `phase2-services.test.js` | Notification fan-out/dedupe, document listing/ownership, job idempotency, email-provider failure paths |
-| `phase5-payments.test.js` | Billing period math, checkout `503` when unconfigured, tenant-scoped billing history, revenue aggregation, manual payment recording, idempotent webhook, unknown-reference rejection |
-| `mongo.integration.test.js` | Real-MongoDB tenant isolation and transactional behavior (skipped without `MONGO_TEST_URI`) |
-| `redis.integration.test.js` | Shared rate-limit store behavior (skipped without `SCHOOLFLOW_REDIS_INTEGRATION=true`) |
+| `phase5-payments.test.js` | Billing periods, fail-closed checkout placeholder, tenant-scoped billing history, revenue aggregation, manual payment recording |
+| `student-media.service.test.js` | Private media, consent withdrawal, fail-closed URL issuance, tenant-scoped filters/queries, direct-upload authorisation and quota cleanup |
+| `receiving-account.test.js` | Platform-only CRUD authorization, strict validation/credential rejection, explicit delete confirmation, platform audit log, active-only safe school-owner projection |
+| `mongo.integration.test.js` / `redis.integration.test.js` | Opt-in live-infrastructure checks (skipped here) |
 
 ### The 3 skipped tests
 
-These skip themselves when the required infrastructure is absent, by design:
+- `mongo.integration.test.js` — **2 tests**. Require `MONGO_TEST_URI` pointing at an isolated MongoDB replica set. The guard rejects database names that do not start with `schoolflow_test`, so it cannot run against a real database by accident.
+- `redis.integration.test.js` — **1 test**. Requires `SCHOOLFLOW_REDIS_INTEGRATION=true` and a dedicated test Redis URL.
 
-- `mongo.integration.test.js` — **2 tests**. Require `MONGO_TEST_URI` pointing at an **isolated** MongoDB replica set. The guard rejects any database whose name does not start with `schoolflow_test`, so it cannot run against a real database by accident.
-- `redis.integration.test.js` — **1 test**. Requires `SCHOOLFLOW_REDIS_INTEGRATION=true` and a reachable Redis URL.
-
-To run them:
-
-```powershell
-# from backend/
-$env:MONGO_TEST_URI="mongodb://localhost:27017/schoolflow_test?replicaSet=rs0"
-$env:SCHOOLFLOW_REDIS_INTEGRATION="true"
-$env:RATE_LIMIT_REDIS_URL="redis://localhost:6379"
-npm test
-```
+They skip by design. See [`backend/docs/ENVIRONMENT.md`](../backend/docs/ENVIRONMENT.md#testtooling-only-variables) before enabling them.
 
 ## Frontend coverage
 
-Five test files under `frontend/test/` (12 tests total):
+`npm test --workspace frontend` covers 83 assertions across payload construction, currency handling, export escaping, feedback state, unsaved-change guards, student-media upload/direct-authorize contracts, branding/logo validation, and the new receiving-account presentation helpers. The helper tests explicitly assert that manual-payment copy never mentions a gateway, checkout, or automatic activation.
 
-| File | Focus |
-|---|---|
-| `academic-setup.test.js` | Academic setup payload construction |
-| `attendance-roster.test.js` | Attendance roster logic |
-| `exam-payload.test.js` | Exam payload building |
-| `export.test.js` | CSV/Excel export and print-to-PDF escaping |
-| `finance-workflows.test.js` | Fee assignment/voucher payload validation |
+## Browser coverage
+
+Seven Playwright specs, all mocked against a local Vite dev server (no live API or provider):
+
+- `academics-timetable.spec.js`
+- `attendance.spec.js`
+- `auth-and-roles.spec.js`
+- `notifications.spec.js`
+- `password-reset-flow.spec.js`
+- `receiving-accounts.spec.js`
+- `school-logo.spec.js`
+
+The receiving-account spec verifies Super Admin create/edit/deactivate/delete with `?confirm=true` on delete, and verifies that a School Owner sees only active accounts, can copy a reference, and issues no mutating requests.
 
 ## What the tests demonstrate
 
 - Multi-tenant isolation: school-scoped queries include the authenticated school id; cross-tenant access is denied.
-- Authorization: role/permission gates for platform, school admin, teacher, and parent routes.
-- Provider failure paths: email, storage, jobs, and payments fail closed with explicit `503`/`403` when unconfigured or unauthorized.
-- Payment orchestration: manual recording, subscription extension, revenue aggregation, and idempotent webhook handling.
-- Frontend payload/validation logic and export escaping.
+- Authorization: role/permission gates for platform, school admin, teacher, and parent routes, including platform-only receiving-account mutations.
+- Provider failure paths: email, storage, jobs, and the payment placeholder fail closed with explicit `503`/`403` where appropriate.
+- Student media: consent withdrawal blocks signed URLs, unpublishes affected media, writes an audit event, and uses tenant-scoped filters for updates, lookups, and reservations.
+- Manual payments: receiving-account CRUD/visibility rules, manual payment recording, subscription activation as an explicit operator action, and revenue aggregation from recorded payments only.
+- Frontend behaviour: payload/validation logic, export escaping, accessibility-related dialog/menu fixes, and the manual receiving-account UI.
 
 ## What the tests do **not** demonstrate
 
-- **No live end-to-end test against a deployed environment.** No Vercel deployment, no Atlas cluster, no real browser run against the deployed API.
-- **No live provider delivery.** Email/storage tests use mocked transports; they do not prove a real provider delivered mail or stored an object.
-- **No real gateway payment.** The gateway adapter does not exist, so checkout/webhook behavior is tested only against a mock adapter.
-- **No load/performance testing.** Rate-limit behavior is tested functionally, not under real concurrency from multiple serverless instances.
-- **No cross-browser or accessibility audit.**
-- **The integration tests were skipped in this run** (no live Mongo/Redis available), so transactional isolation was verified structurally and by unit mocks, not against a live replica set in this environment.
+- **No live deployment test.** No Vercel deployment, Atlas cluster, real cookie/CSP behaviour across a real origin, or browser run against a deployed API.
+- **No live provider delivery.** Email/storage tests use mocks; MongoDB and Redis integration tests were skipped.
+- **No real payment.** There is no gateway adapter by decision; checkout returns `503`. Manual payments are recorded only after external verification by a Super Admin.
+- **No load/performance test**, no cross-browser matrix, no formal accessibility conformance audit, and no penetration test.
+- **No live backup/PITR/restore rehearsal**, monitoring, alerting, or scheduler verification.
 
-Passing tests are necessary but not sufficient for a production claim. See [`PRODUCTION-VERDICT.md`](./PRODUCTION-VERDICT.md).
+Passing tests are necessary but not sufficient for a production claim. See [`PRODUCTION-VERDICT.md`](./PRODUCTION-VERDICT.md) for the honest A–I readiness status.

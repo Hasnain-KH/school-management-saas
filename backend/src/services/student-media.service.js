@@ -992,7 +992,7 @@ export const getAdminMediaDetail = async (req, id) => {
   if (!media) throw new HttpError(404, "Media was not found");
   const [students, uploader, consents] = await Promise.all([
     Student.find({ schoolId, _id: { $in: media.studentIds } }).select("_id firstName lastName admissionNumber classId sectionId").lean(),
-    User.findById(media.uploadedBy).select("_id name email role").lean(),
+    User.findOne({ _id: media.uploadedBy, schoolId }).select("_id name email role").lean(),
     getConsentForStudents(schoolId, media.studentIds)
   ]);
   const consentEval = await evaluateMediaConsent(schoolId, media);
@@ -1450,7 +1450,7 @@ export const authorizeTeacherDirectUpload = async (req, input) => {
     };
     if (dailyReservation._id) {
       await StudentMediaUploadReservation.updateOne(
-        { _id: reserved.reservation._id },
+        { schoolId, _id: reserved.reservation._id },
         {
           $set: {
             directUpload: { uploadId, storageKey, kind: authorization.kind },
@@ -1610,7 +1610,7 @@ export const finalizeTeacherDirectUpload = async (req, input) => {
       await commitDailyUploadSlot({ ...payload.dailyReservation, mediaId: created._id });
       if (payload.dailyReservation._id) {
         await StudentMediaUploadReservation.updateOne(
-          { _id: payload.dailyReservation._id },
+          { schoolId, _id: payload.dailyReservation._id },
           { $set: { completionStatus: "completed", completedAt: new Date(), mediaId: created._id } }
         );
       }
@@ -1825,7 +1825,8 @@ const assertParentCanAccessPublishedMedia = async (req, media) => {
   if (!consent.ok) {
     const invalidStatus = consent.blockedStudentIds.length ? "blocked"
       : (consent.withdrawnStudentIds.length ? "withdrawn" : "pending");
-    await StudentMedia.updateOne({ _id: media._id }, { $set: { consentStatus: invalidStatus, publicationStatus: "unpublished" } });
+    await StudentMedia.updateOne({ schoolId, _id: media._id }, { $set: { consentStatus: invalidStatus, publicationStatus: "unpublished" } });
+    await writeAudit(req, { action: "student_media.consent_invalidated", resourceId: media._id, metadata: { reason: "consent_invalidated", consentStatus: invalidStatus, publicationStatus: "unpublished" } });
     await logAccess({ schoolId, mediaId: media._id, actorUserId: req.user._id, actorRole: req.user.role, action: "blocked", outcome: "denied", reason: "consent_invalidated" });
     throw new HttpError(404, "Media is not available");
   }
@@ -1878,13 +1879,16 @@ export const getSecureMediaAccess = async (req, id) => {
   if (!consent.ok) {
     const withdrawnOrBlocked = consent.withdrawnStudentIds.length > 0 || consent.blockedStudentIds.length > 0;
     if (withdrawnOrBlocked || req.user.role === "parent") {
-      await StudentMedia.updateOne({ _id: media._id }, {
+      const invalidStatus = consent.blockedStudentIds.length ? "blocked"
+        : (consent.withdrawnStudentIds.length ? "withdrawn" : "blocked");
+      const nextPublicationStatus = media.publicationStatus === "published" ? "unpublished" : media.publicationStatus;
+      await StudentMedia.updateOne({ schoolId, _id: media._id }, {
         $set: {
-          consentStatus: consent.blockedStudentIds.length ? "blocked"
-            : (consent.withdrawnStudentIds.length ? "withdrawn" : "blocked"),
-          publicationStatus: media.publicationStatus === "published" ? "unpublished" : media.publicationStatus
+          consentStatus: invalidStatus,
+          publicationStatus: nextPublicationStatus
         }
       });
+      await writeAudit(req, { action: "student_media.consent_invalidated", resourceId: media._id, metadata: { reason: "consent_invalidated", consentStatus: invalidStatus, publicationStatus: nextPublicationStatus } });
       await logAccess({ schoolId, mediaId: media._id, actorUserId: req.user._id, actorRole: req.user.role, action: "blocked", outcome: "denied", reason: "consent_invalidated" });
       throw new HttpError(req.user.role === "parent" ? 404 : 403, "Media access is blocked because required consent is missing, withdrawn, or invalid");
     }

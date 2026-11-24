@@ -7,6 +7,7 @@ import {
     updateSchoolProfile
 } from "../services/school.service.js";
 import { toPublicSchool } from "../services/auth.service.js";
+import { listActiveReceivingAccountsForSchool } from "../services/receiving-account.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { sendSuccess } from "../utils/responses.js";
 
@@ -17,6 +18,9 @@ export const getCurrentSchool = async (req, res) => {
     }
     return sendSuccess(res, 200, { school: toPublicSchool(school) });
 };
+
+export const listReceivingAccounts = async (req, res) =>
+    sendSuccess(res, 200, { accounts: await listActiveReceivingAccountsForSchool() });
 
 export const updateCurrentSchool = async (req, res) => {
     const school = await updateSchoolProfile(req, req.body);

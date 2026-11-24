@@ -48,6 +48,7 @@ function DetailModal({ item, onClose }) {
 
 export default function ParentMomentsPage() {
   const [children, setChildren] = useState([]);
+  const [childrenError, setChildrenError] = useState("");
   const [studentId, setStudentId] = useState("");
   const [category, setCategory] = useState("");
   const [items, setItems] = useState([]);
@@ -57,7 +58,13 @@ export default function ParentMomentsPage() {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
 
-  useEffect(() => { get("/portal/parent/children").then((r) => setChildren(Array.isArray(r) ? r : (r?.items || []))).catch(() => setChildren([])); }, []);
+  useEffect(() => {
+    let active = true;
+    get("/portal/parent/students")
+      .then((r) => { if (active) setChildren(Array.isArray(r) ? r : (r?.items || [])); })
+      .catch((reason) => { if (active) setChildrenError(reason.message || "Could not load linked children."); });
+    return () => { active = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -75,7 +82,8 @@ export default function ParentMomentsPage() {
       <div className="table-toolbar">
         <div><strong>Timeline</strong><span>{pagination?.total ?? items.length} items</span></div>
         <div className="toolbar-filters">
-          <label className="inline-toggle">Child<select value={studentId} onChange={(e) => { setStudentId(e.target.value); setPage(1); }}><option value="">All linked children</option>{children.map((c) => <option key={c.studentId || c.id} value={c.studentId || c.id}>{c.firstName} {c.lastName}</option>)}</select></label>
+          {childrenError && <p className="form-error" role="alert">{childrenError}</p>}
+          <label className="inline-toggle">Child<select value={studentId} onChange={(e) => { setStudentId(e.target.value); setPage(1); }}><option value="">All linked children</option>{children.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}</select></label>
           <label className="inline-toggle">Category<select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }}>{CATEGORIES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
         </div>
       </div>

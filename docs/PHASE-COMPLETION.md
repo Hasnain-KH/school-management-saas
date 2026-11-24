@@ -6,9 +6,9 @@ This report summarizes the five phases of the production-readiness program for S
 
 ## Change inventory
 
-- **33 tracked files modified**, **32 new files added** (untracked in this session's working tree), all still uncommitted.
-- Backend: 122 tests → 119 pass, 0 fail, 3 skipped.
-- Frontend: 12 tests → 12 pass, 0 fail; production build succeeds (2230 modules).
+- **Final working tree:** 29 tracked files modified and 9 new files added (all uncommitted by instruction). This includes the phase work plus the final receiving-account, media, UI, and documentation fixes.
+- Backend final: 291 tests, 288 pass, 0 fail, 3 skipped.
+- Frontend final: 83 tests, 83 pass, 0 fail; Playwright 45 passed; production build succeeds (2255 modules).
 
 ---
 
@@ -60,13 +60,13 @@ This report summarizes the five phases of the production-readiness program for S
 
 - **Payment core:** `payment.model.js`, `payment.service.js`, `payment.validator.js`, `payment.controller.js`, `payment.routes.js`.
   - `recordManualPayment` records an offline payment (bank transfer, cash, operator-entered wallet receipt) as `paid` and, with `applySubscription: true`, activates/extends the school subscription in the same transaction.
-  - `createCheckout` creates a `pending` gateway payment and calls the gateway adapter; returns `503` until an adapter is configured.
-  - `handleGatewayWebhook` verifies the provider signature, is idempotent (an already-paid reference is never reprocessed), and extends the subscription on a paid event.
-  - `revenueReport` aggregates paid payments by currency, by month, and by plan, plus pending (outstanding) totals — every figure comes from recorded payments, nothing is hardcoded.
-- **API surface:** platform routes `POST /platform/schools/:schoolId/payments`, `POST .../checkout`, `GET /platform/payments`, `GET /platform/reports/revenue`; school route `GET /schools/billing`. Webhook is public and signature-verified; `app-factory.js` captures the raw body for `/api/v1/payments/webhook` before the JSON parser.
+  - `createCheckout` is a fail-closed placeholder with **no adapter by business decision**; it returns `503` and must not be implemented as an online checkout.
+  - `handleGatewayWebhook` is likewise a fail-closed placeholder. No payment event is accepted, verified, or applied automatically.
+  - `revenueReport` aggregates paid payments by currency, by month, and by plan, plus legacy pending (outstanding) totals — every figure comes from recorded payments, nothing is hardcoded.
+- **API surface:** platform routes `POST /platform/schools/:schoolId/payments`, `POST .../checkout` (always `503`), `GET /platform/payments`, `GET /platform/reports/revenue`; school route `GET /schools/billing`. The webhook path is a placeholder only and is not a usable payment integration.
 - **Indexes:** `Payment` added to `create-indexes.js`.
-- **UI:** `BillingPage.jsx` (school billing history) and `PlatformRevenuePage.jsx` (revenue summary, payment list, record-payment modal), with routes and nav entries.
-- **Tests:** `backend/test/phase5-payments.test.js`.
+- **UI:** `BillingPage.jsx` (school billing history plus active receiving accounts and copy-only workflow), `PlatformRevenuePage.jsx` (revenue summary, payment list, record-payment modal, and Super Admin receiving-account management), with routes and nav entries.
+- **Tests:** `backend/test/phase5-payments.test.js`, `backend/test/receiving-account.test.js`, `frontend/test/receiving-accounts.test.js`, and `frontend/e2e/receiving-accounts.spec.js`.
 
 ---
 
@@ -74,14 +74,16 @@ This report summarizes the five phases of the production-readiness program for S
 
 | Check | Command | Result |
 |---|---|---|
-| Backend tests | `npm test --workspace backend` | 122 tests, 119 pass, 0 fail, 3 skipped |
-| Frontend tests | `npm test --workspace frontend` | 12 tests, 12 pass, 0 fail |
-| Frontend build | `npm run build --workspace frontend` | Success, 2230 modules |
+| Backend tests | `npm test --workspace backend` | 291 tests, 288 pass, 0 fail, 3 skipped |
+| Frontend tests | `npm test --workspace frontend` | 83 tests, 83 pass, 0 fail |
+| Browser E2E | `npx playwright test` from `frontend/` | 45 passed |
+| Frontend build | `npm run build --workspace frontend` | Success, 2255 modules |
+| Icon check | `npm run check:icons --workspace frontend` | 54 files, 0 violations |
 
 The 3 skipped tests require live infrastructure (`MONGO_TEST_URI` for the real-Mongo isolation test; `SCHOOLFLOW_REDIS_INTEGRATION=true` for the Redis limiter test). They are opt-in by design. See [`TESTING.md`](./TESTING.md) for details.
 
 ## What was deliberately not done
 
 - **Splitting `WorkspacePage.jsx`** (a ~1038-line monolith) into modules was skipped: the regression risk outweighs the organizational benefit. New features were added as separate page components instead.
-- **No payment gateway adapter** was written. A real adapter must enforce provider-specific signature verification and cannot be validated without an account; the orchestration around it is complete and honest about the `503`.
+- **No payment gateway adapter** was written, by business decision. There is no checkout, webhook, receipt upload, automated verification, or automatic activation; only the manual receiving-account workflow is supported. See [`MANUAL-PAYMENTS.md`](./MANUAL-PAYMENTS.md).
 - **No live deployment or external account** was created.
